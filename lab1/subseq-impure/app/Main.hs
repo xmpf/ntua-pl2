@@ -1,18 +1,25 @@
 -- pragmas
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Main where
 
 -- imports
 import Control.Monad.ST
 import Data.Array.ST
-import Data.Foldable as F
-import Data.Sequence as S
+import qualified Data.Foldable as F
+import qualified Data.Sequence as Seq
+
+-- Sequence views (containers @grader is out of date)
+pattern Empty   <- (Seq.viewl -> Seq.EmptyL)  where Empty = Seq.empty
+pattern x :< xs <- (Seq.viewl -> x Seq.:< xs) where (:<)  = (Seq.<|)
+pattern xs :> x <- (Seq.viewr -> xs Seq.:> x) where (:>)  = (Seq.|>)
 
 -- process array
 -- Dynamic Programming Approach: O(n^2) time/space
 -- resource: https://www.geeksforgeeks.org/count-palindrome-sub-strings-string/
-process :: Int -> String -> ST s (Integer)
+process :: Int -> Seq.Seq Char -> ST s (Integer)
 process dim str = do
     !vec <- newArray ((1, 1), (dim, dim)) 0 :: ST s (STArray s (Int, Int) Integer)
     
@@ -20,28 +27,38 @@ process dim str = do
     F.forM_ [1..dim] $ \i -> writeArray vec (i,i) 1 
 
     -- compute reverse of string
-    let !str' = reverse str
 
     -- cntPals (left=1) (right=dim)
-    cntPals str str' 1 dim vec  
+    cntPals str 1 dim vec  
     where 
-        cntPals :: String -> String -> Int -> Int -> STArray s (Int, Int) Integer -> ST s (Integer)
-        cntPals [] [] _ _ _ = pure 0
-        cntPals (x:xs) (y:ys) l r arr
+        cntPals :: Seq.Seq Char -> Int -> Int -> STArray s (Int, Int) Integer -> ST s (Integer)
+        cntPals Empty _ _ _ = pure 0
+        cntPals (_ :< Empty) _ _ _ = pure 1
+        cntPals ((x :< xs) :> y) l r arr
             | l > r = pure 0    -- nothing found
             | l == r = pure 1   -- one element
             | otherwise = do    -- l < r
-                ret <- readArray arr (l, r)
+                !ret <- readArray arr (l, r)
                 case ret of
                     0 -> do
-                        left  <- cntPals xs (y:ys) (l + 1) r arr
-                        right <- cntPals (x:xs) ys l (r - 1) arr
-                        middle <- cntPals xs ys (l + 1) (r - 1) arr
+                        -- drop last char
+                        !left  <- cntPals (x :< xs) l (r - 1) arr
+                        -- drop first char
+                        !right <- cntPals (xs :> y) (l + 1) r arr
+                        -- eager computation
                         let !sum = left + right
-                        let ans' = 1 + sum
-                        let !ans'' = sum - middle
-                        if (x == y) then (writeArray arr (l, r) ans') >> pure ans'
-                        else (writeArray arr (l, r) ans'') >> pure ans''
+                        let !ans' = 1 + sum
+                        
+                        if (x == y) then do
+                            writeArray arr (l, r) ans'
+                            pure ans'
+                        else do
+                            -- drop both first and last chars
+                            !middle <- cntPals xs (l + 1) (r - 1) arr
+                            let !ans'' = sum - middle
+                            writeArray arr (l, r) ans''
+                            pure ans''
+
                     ans -> pure ans
 
 -- main
@@ -51,7 +68,7 @@ main = do
     dim <- getLine
 
     -- get string from stdin
-    str <- getLine
+    str <- Seq.fromList <$> getLine
     
     -- parse it as Int / use it to create array
     let dimInt = Prelude.read dim :: Int

@@ -34,9 +34,9 @@ process dim str = do
                 ret <- readArray arr (l, r)
                 case ret of
                     0 -> do
-                        left  <- cntPals xs (y:ys) (l + 1) r arr
-                        right <- cntPals (x:xs) ys l (r - 1) arr
-                        middle <- cntPals xs ys (l + 1) (r - 1) arr
+                        !left  <- cntPals xs (y:ys) (l + 1) r arr
+                        !right <- cntPals (x:xs) ys l (r - 1) arr
+                        !middle <- cntPals xs ys (l + 1) (r - 1) arr
                         let !sum = left + right
                         let ans' = 1 + sum
                         let !ans'' = sum - middle

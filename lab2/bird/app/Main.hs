@@ -186,13 +186,36 @@ bird = T 1 [left, right]
 -- | Bird Tree: QuickCheck Testing
 
 
--- path
-prop_path :: Int -> Bool
-prop_path sz = undefined
-
+--  path (n) bird /(or)/ trimTree n bird we end up in the same node
+--  shuffle :: [a] -> Gen [a] 
+--  Generates a random permutation of the given list.
+prop_path :: Int -> Property
+prop_path sz =
+    -- trimTree starts with size 1 for /root/ hence for sz=1 we get /root/ element
+    forAll randPath (\x -> (path x bird == (path x . trimTree sz) bird))
+    where randPath = (shuffle $ take (sz - 1) $ cycle [0,1]) :: Gen [Int]
+    -- I couldn't find a way to \lower\ Gen [a] \to\ [a] so I have used forAll
+    -- forAll :: (Show a, Testable prop) => Gen a -> (a -> prop) -> Property
+    
+-- 1
+--  \
+--   2
+--  /
+-- 3
+--  \
+--   4
+--   /
+-- ... 
 -- zig zag (right - left)
 prop_ziggy :: Int -> Bool
-prop_ziggy depth = undefined
+prop_ziggy depth =
+    -- right (1) -> left (0) => take depth (cycle [1, 0])
+    aux depth 0 == take depth [1..]
+    where aux :: Int -> Int -> [Int]
+          aux i j 
+           | i <= 0 = []
+           | otherwise = (fromEnum $ path (take j $ cycle [1, 0]) bird) : aux (i - 1) (j + 1)
+            -- fromEnum :: a -> Int  =>   \Convert to an Int\
 
 -- leftmost => [denominator] fibonacci sequence
 prop_fibonacci depth = undefined
@@ -204,7 +227,7 @@ prop_rationalExist = undefined
 
 -- given a real number, return the path in the bird tree
 findBird :: Rational -> [Int]
-findBird = undefined
+findBird r = undefined
 
 -- main
 main :: IO ()

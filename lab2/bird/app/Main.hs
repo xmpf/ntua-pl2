@@ -4,7 +4,6 @@
 module Main where
 
 -- Libraries
-import Data.Maybe
 import Test.QuickCheck
 
 -- QuickCheck
@@ -31,10 +30,7 @@ import Test.QuickCheck
 data Tree a = T a [Tree a] deriving Show
 --
 
--- |                                |
--- |  QuickCheck Specific Functions |
--- |________________________________|
--- resource:  
+-- |  QuickCheck Specific Functions
 
 instance Arbitrary a => Arbitrary (Tree a) where
     arbitrary = sized genSizedTree
@@ -51,11 +47,9 @@ genSizedTree n = do
     root <- arbitrary
     return (T root nodes)
     
-
--- |                                |
--- |  General (Rose) Tree Functions |
--- |________________________________|
--- resource: https://hackage.haskell.org/package/containers-0.6.0.1/docs/Data-Tree.html
+                              
+-- |  General (Rose) Tree Functions 
+-- |  https://hackage.haskell.org/package/containers-0.6.0.1/docs/Data-Tree.html
 
 
 -- foldr
@@ -107,22 +101,22 @@ leaves t = foldTree (\x xs -> (if (null xs) then [x] else []) ++ concat xs) t
 mapTree :: (a -> b) -> Tree a -> Tree b
 mapTree f = foldTree (\t ts -> T (f t) ts)
 
---                       --
--- == NOT IMPLEMENTED == --
---                       --
-
 -- trimTree n t
 trimTree :: Int -> Tree a -> Tree a
-trimTree n t = undefined
+trimTree n (T t ts) 
+    | n <= 0 = undefined
+    | n == 1 = (T t [])
+    | otherwise = (T t (map (trimTree (n - 1)) ts))
 
 -- path l t
-path :: [Int] -> Tree a -> Maybe a
-path l t = undefined 
+path :: [Int] -> Tree a -> a
+path [] (T t ts) = t
+path (l : ls) (T t ts) =
+    -- we suppose that [path] won't raise exception
+    path ls (ts !! l)
 
 
--- |                                |
--- | QuickCheck: Testing Properties |
--- |________________________________|
+-- | QuickCheck: Testing Properties
 
 -- height > 0 && height <= size
 prop_height :: (Eq a) => Tree a -> Bool
@@ -181,9 +175,7 @@ prop_fn f t =
     in ( tn == tl) 
 
 
--- |                                    |
--- | Bird Tree: Infinite Data Structure |
--- |____________________________________|
+-- | Bird Tree: Infinite Data Structure
 
 bird :: Tree Rational
 bird = T 1 [left, right]
@@ -191,9 +183,7 @@ bird = T 1 [left, right]
             left = mapTree (^^ (- 1)) $ mapTree (+ 1) bird  -- 1 / (x + 1)
 
 
--- |                               |
--- | Bird Tree: QuickCheck Testing |
--- |_______________________________|
+-- | Bird Tree: QuickCheck Testing
 
 
 -- path

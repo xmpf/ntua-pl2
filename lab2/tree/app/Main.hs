@@ -4,7 +4,7 @@
 module Main where
 
 -- imports
-
+import Data.Maybe
 
 data Tree a = T a [Tree a] deriving Show
 
@@ -34,30 +34,45 @@ maxTree = foldTree (\x y -> maxi x y)
                                          else maxi y ys
 -- inTree x t
 inTree :: Eq a => a -> Tree a -> Bool
-inTree = undefined
+inTree x t = x `elem` foldTree (\a as -> a : concat as) t
 
 -- nodes t
 nodes :: Tree a -> [a]
-nodes (T t []) = [t]
-nodes (T t ts) = foldl (++) [t] (map nodes ts)
+nodes = foldTree (\x xs -> x : concat xs)
 
 -- countTree pred t
 countTree :: (a -> Bool) -> Tree a -> Integer
-countTree pred (T t []) = if (pred t) then 1 else 0
-countTree pred (T t ts) = ta + foldr (+) 0 (map (countTree pred) ts)
-                            where ta = if (pred t) then 1 else 0
+countTree pred t = cnt $ map pred $ foldTree (\a as -> a : concat as) t
+    where
+        cnt [] = 0
+        cnt (True : x) = 1 + cnt x
+        cnt (_ : x) = cnt x
 
 -- leaves t
 leaves :: Tree a -> [a]
-leaves (T t []) = [t]
-leaves (T t ts) = foldr (++) [] (map leaves ts)
+leaves t = foldTree (\x xs -> (if (null xs) then [x] else []) ++ concat xs) t
+
 
 -- mapTree f t
 mapTree :: (a -> b) -> Tree a -> Tree b
-mapTree = undefined
+mapTree f = foldTree (\t ts -> T (f t) ts)
+
+--                       --
+-- == NOT IMPLEMENTED == --
+--                       --
+
+-- trimTree n t
+trimTree :: Int -> Tree a -> Tree a
+trimTree n t = undefined
+
+-- path l t
+path :: [Int] -> Tree a -> Maybe a
+path l t = undefined 
+        
 
 -- main
 main :: IO ()
 main = do
+    -- testing
     let t1 = T 1 [ T 2 [ T 3 [], T 4 [ T 5 [ ], T 6 [ T 7 [] ] ] ] ]
-    print $ heightTree t1
+    print $ trimTree 2 t1

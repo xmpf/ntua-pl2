@@ -1,0 +1,81 @@
+# Check that jump works.
+jump start
+"Error: jump is not working!\n"
+print_error_1:
+dup 0
+jnz do_print_error_1
+drop
+jump end_print_error_1
+do_print_error_1:
+output
+jump print_error_1
+end_print_error_1:
+halt
+
+# Let's...
+start:
+
+# Push sentinel
+42174217
+
+# Print message.
+"Hello world!\n"
+print_message:
+dup 0
+jnz do_print_message
+drop
+jump end_print_message
+do_print_message:
+output
+jump print_message
+end_print_message:
+
+# Print the horizontal line.
+17
+loop:
+42
+output
+1
+sub
+dup 0
+jnz loop
+drop
+10
+output
+
+# Clock tick.
+clock
+
+# Check sentinel.
+42174217
+eq
+jnz skip_mismatch
+
+"Error: stack operations not working properly!\n"
+print_error_3:
+dup 0
+jnz do_print_error_3
+drop
+jump end_print_error_3
+do_print_error_3:
+output
+jump print_error_3
+end_print_error_3:
+
+skip_mismatch:
+
+# And that's all.
+halt
+
+# Check that halt works.
+error:
+"Error: halt is not working!\n"
+print_error_2:
+dup 0
+jnz do_print_error_2
+drop
+jump end_print_error_2
+do_print_error_2:
+output
+jump print_error_2
+end_print_error_2:

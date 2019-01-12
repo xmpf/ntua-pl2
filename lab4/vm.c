@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <time.h>
 #include <string.h>
+#include <assert.h>
 
 /* DEBUGGING OPTIONS */
 #ifndef DEBUG
@@ -25,7 +26,9 @@
 #endif
 
 /* MACROS */
-#define NEXT_INSTR goto *(vm.code + vm.pc)
+#define NEXT_INSTR  goto *(vm.code[vm.pc])
+
+#define TEST printf("I AM HERE %d\n", __LINE__)
 
 #define STACK_MAX (1 << 16)     /* 64 KB */
 #define CODE_MAX  (1 << 16)     /* 64 KB */
@@ -140,18 +143,46 @@ int main (int argc, char *argv[])
     };
 
     /**
+     * Defines how many bytes contain data for each opcode
+     */
+    static const uint8_t op_bytes[] = {
+        0, 2, 2, 1, 1, 0, 4, 2, 1, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0
+    };
+
+    /**
      *  Load bytecode into array
      */
     TEXT src;
     vm.code = src.text;         /* pointer to source code array */
     static uint16_t len = 0;    /* 16 bits */
-    while( fscanf(code, "%c", &vm.opcode) == 1 ) {
-        printf ("\n\nMAYBE BUG\n\n");
-        *(vm.code + len) = (uint64_t)labels[vm.opcode];
-        ++len;
+    uint8_t byte, op_byte;
+    while( fscanf(code, "%c", &vm.opcode) == 1 ) { // WHILE NOT EOF OR ERROR
+
+        vm.code[len] = (uint64_t)labels[vm.opcode];
+        len += 1;
+        
+        /* GET THE DATA */
+        for (byte = 0; byte < op_bytes[vm.opcode]; byte++) {
+            if ( fscanf(code, "%c", &op_byte) != 1 ) { return EXIT_FAILURE; }
+            vm.code[len] = op_byte;
+            len += 1;
+        }
     }
+    #if DEBUG
+    for (uint16_t i = 0; i < len; i++) {
+        printf ("0x%x: ", i);
+        for (int j = 0; j < 4; j++) {
+            printf ("%lx \t", vm.code[i*4 + j]);
+        }
+        printf ("\n");
+    }
+    #endif
     fclose (code);
-    
+
     /* Initialize Stack */
     STACK stack;
     STACK_INIT(&stack);
@@ -160,7 +191,8 @@ int main (int argc, char *argv[])
     clock_t vm_start = clock();
 
 // --------------------------[INTERPRETER]--------------------------------
-    NEXT_INSTR;
+    NEXT_INSTR;     /* SEGMENTATION FAULT */
+                    /* OUT OF BOUNDS MEMORY ACCESS */
 
 /* HALT MACHINE */
 L_HALT:
@@ -176,7 +208,8 @@ L_JMP:
     #if DEBUG
     printf ("JMP\n");
     #endif
-    vm.pc = get_2bytes(&vm);
+    vm.pc = (uint32_t)get_2bytes(&vm);
+
     NEXT_INSTR;
 }
 /* JUMP IF NOT ZERO */
@@ -186,7 +219,7 @@ L_JNZ:
     printf ("JNZ\n");
     #endif
     if ( stack.stack[stack.top] ) {
-        vm.pc = get_2bytes(&vm);
+        vm.pc = (uint32_t)get_2bytes(&vm);
     } else { 
         vm.pc += 3;
     }
@@ -268,7 +301,7 @@ L_PUSH:
     #if DEBUG
     printf ("PUSH\n");
     #endif
-    vm.pc += 1;
+    vm.pc += 2;
 
     int8_t element8 = (int8_t)get_byte(&vm);
     STACK_PUSH(&stack, (int32_t)element8);
@@ -515,6 +548,16 @@ L_CLEANUP:
     /* VM ENDED INTERPRETING */
     clock_t vm_end = clock();
     printf ("Interpreted in %lf\n", ((double)(vm_end - vm_start) / CLOCKS_PER_SEC));
+
+	#if DEBUG
+		if (stack.top <= 0) printf("stack[-1] = ...\n");
+		else {
+			for (int32_t j = stack.top; j >= 0; j--){
+				printf("stack[%d] = %d\n", j, stack.stack[j]);
+			}
+		}
+	#endif
+
     VM_DESTROY(&vm);
 }
 
@@ -603,18 +646,19 @@ static inline void VM_DESTROY(VM *vm)
 */
 static inline uint8_t get_byte(VM *vm)
 {
-    return *(vm->code + vm->pc + 1);
+    return (uint32_t)(vm->code[vm->pc + 1]);
 }
 
 static inline uint16_t get_2bytes(VM *vm)
 {
-    return (*(vm->code + vm->pc + 2) << 8) | (*(vm->code + vm->pc + 1));
+    return (uint16_t)((vm->code[vm->pc + 2]) << 8 | 
+                      (vm->code[vm->pc + 1]));
 }
 
 static inline uint32_t get_4bytes(VM *vm)
 {
-    return (*(vm->code + vm->pc + 4) << 24) | 
-           (*(vm->code + vm->pc + 3) << 16) | 
-           (*(vm->code + vm->pc + 2) << 8)  |
-           (*(vm->code + vm->pc + 1));
+    return (uint32_t)((vm->code[vm->pc + 4] << 24) | 
+                      (vm->code[vm->pc + 3] << 16) | 
+                      (vm->code[vm->pc + 2] << 8)  |
+                      (vm->code[vm->pc + 1]));
 }

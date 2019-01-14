@@ -1,10 +1,13 @@
 import Data.Char
 import Text.Read
 import Text.Read.Lex
+import Data.Map (Map)
+import qualified Data.Map as M
 
 -- Syntax
-
 type Var = String
+type Env = Map Var E
+type S = Var -> Integer
 
 data C = Cskip | Cassign Var E | Cseq C C | Cfor E C | Cif E C C | Cwhile E C
 data E = Ezero | Esucc E | Epred E | Eif E E E | Evar Var
@@ -12,7 +15,6 @@ data E = Ezero | Esucc E | Epred E | Eif E E E | Evar Var
        | Econs E E | Ehd E | Etl E
 
 -- Pretty-printing
-
 instance Show E where
   showsPrec p Ezero = ("0" ++)
   showsPrec p (Esucc n) = ("succ " ++) . showsPrec 2 n
@@ -61,7 +63,6 @@ instance Show C where
     ("while " ++) . showsPrec 1 e . (" do " ++) . showsPrec 1 c
 
 -- Parsing
-
 isVar x = all isAlpha x && not (x `elem` keywords)
   where keywords = ["zero", "succ", "true", "not", "skip",
                     "for", "if", "then", "else", "while", "do",
@@ -167,9 +168,94 @@ instance Read C where
                 c <- readPrec
                 return (Cwhile e c))
 
--- Main function: parsing a statement and pretty-printing
+-- evaluate to Int
+eToInt :: Env -> E -> Int
+eToInt env (Evar name) = eToInt env (env M.! name)
+eToInt _ Ezero = 0
+eToInt env (Esucc e) = 1 + eToInt env e
+eToInt env (Epred e) = (-1) + eToInt env e
+eToInt _ Etrue = 1
+eToInt _ Efalse = 0
 
-main = do  input <- getContents
-           let c :: C
-               c = read input
-           print c
+-- evaluate to Bool
+eToBool :: Env -> E -> Bool
+eToBool env (Evar name) = eToBool env (env M.! name)
+eToBool _ Ezero = False
+eToBool _ Etrue = True
+eToBool _ Efalse = False
+eToBool env (Enot e) = not (eToBool env e)
+eToBool env (Elt e e') = 
+  let ie = eToInt env e
+      ie' = eToInt env e'
+  in ie < ie'
+eToBool env (Eeq e e') =
+  let ie = eToInt env e
+      ie' = eToInt env e'
+  in ie == ie'
+eToBool env (Eif e e' e'') = if eToBool env e then eToBool env e' 
+                                                    else eToBool env e''
+
+-- evaluate w/o substituting
+eNoEval :: Env -> E -> E
+eNoEval env (Evar name) = eNoEval env (env M.! name)
+eNoEval _ Ezero = Ezero
+eNoEval _ Etrue = Etrue
+eNoEval _ Efalse = Efalse
+eNoEval env (Esucc e) = Esucc $ eNoEval env e
+eNoEval env (Epred e) = Epred $ eNoEval env e
+eNoEval env (Eif e e' e'') = Eif (eNoEval env e) (eNoEval env e') (eNoEval env e'')
+eNoEval env (Elt e e') = Elt (eNoEval env e) (eNoEval env e')
+eNoEval env (Eeq e e') = Eeq (eNoEval env e) (eNoEval env e')
+eNoEval env (Enot e) = Enot $ eNoEval env e
+eNoEval env (Econs e e') = Econs (eNoEval env e) (eNoEval env e')
+eNoEval env (Ehd e) = Ehd $ eNoEval env e
+eNoEval env (Etl e) = Etl $ eNoEval env e
+
+-- evaluate
+eval :: Env -> E -> Int
+eval _ Ezero = 0
+eval _ Efalse = 0
+eval _ Etrue = 1
+eval env (Esucc e) = 1 + eToInt env e
+eval env (Epred e) = (-1) + eToInt env e
+eval env (Eif e e' e'') = if (eToBool env e) then ee' else ee''
+   where ee' = eval env e'
+         ee'' = eval env e''
+eval env (Elt e e') = if cond then 1 else 0
+   where cond = (eval env e) < (eval env e')
+eval env (Eeq e e') = if cond then 1 else 0
+   where cond = (eval env e) == (eval env e')
+eval env (Enot e) = if cond then 0 else 1
+   where cond = eToBool env e
+eval env (Ehd (Econs e _)) = eval env e
+eval env (Etl (Econs _ e)) = case e of
+                              Econs _ e -> eval env (Etl e)
+                              otherwise -> eToInt env e
+eval env (Econs e e') = undefined
+
+interpret :: Env -> C -> Env
+interpret env Cskip = env
+interpret env (Cassign name e) = M.insert name (eNoEval env e) env
+interpret env (Cseq c c') = 
+  let env' = interpret env c
+  in  interpret env' c'
+interpret env (Cfor (Evar name) c) = case M.lookup name env of
+  Nothing -> error "Variable not found"
+  Just e  -> interpret env (Cfor e c)
+interpret env (Cfor (Esucc Ezero) c) = interpret env c
+interpret env (Cfor Ezero c) = env
+interpret env (Cfor (Esucc e) c) =
+  let env' = interpret env c
+  in  interpret env' (Cfor e c) 
+interpret env (Cif e c c') = if eToBool env e then interpret env c
+                                                  else interpret env c'
+interpret env (Cwhile e c) = if eToBool env e then let env' = interpret env c in interpret env' (Cwhile e c)
+                                                  else env
+
+main :: IO ()
+main = do  
+   input <- getContents
+   let c = read input :: C
+   let map = interpret M.empty c
+   let result = M.findWithDefault Ezero "result" map
+   print $ eval map result

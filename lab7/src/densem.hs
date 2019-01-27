@@ -9,12 +9,18 @@ type Var = String
 type Env = Map Var E
 type S = Var -> Integer
 
+data R = I Int | B Bool | L R R
 data C = Cskip | Cassign Var E | Cseq C C | Cfor E C | Cif E C C | Cwhile E C
 data E = Ezero | Esucc E | Epred E | Eif E E E | Evar Var
        | Etrue | Efalse | Elt E E | Eeq E E | Enot E
        | Econs E E | Ehd E | Etl E
 
 -- Pretty-printing
+instance Show R where
+   show (I i) = show i
+   show (B b) = show b
+   show (L x y) = show x ++ ":" ++ show y
+ 
 instance Show E where
   showsPrec p Ezero = ("0" ++)
   showsPrec p (Esucc n) = ("succ " ++) . showsPrec 2 n
@@ -193,7 +199,7 @@ eToBool env (Eeq e e') =
       ie' = eToInt env e'
   in ie == ie'
 eToBool env (Eif e e' e'') = if eToBool env e then eToBool env e' 
-                                                    else eToBool env e''
+                                              else eToBool env e''
 
 -- evaluate w/o substituting
 eNoEval :: Env -> E -> E
@@ -212,26 +218,24 @@ eNoEval env (Ehd e) = Ehd $ eNoEval env e
 eNoEval env (Etl e) = Etl $ eNoEval env e
 
 -- evaluate
-eval :: Env -> E -> Int
-eval _ Ezero = 0
-eval _ Efalse = 0
-eval _ Etrue = 1
-eval env (Esucc e) = 1 + eToInt env e
-eval env (Epred e) = (-1) + eToInt env e
+eval :: Env -> E -> R
+eval _ Ezero = I 0
+eval _ Efalse = B False
+eval _ Etrue = B True
+eval env (Esucc e) = I $ 1 + eToInt env e
+eval env (Epred e) = I $ (-1) + eToInt env e
 eval env (Eif e e' e'') = if (eToBool env e) then ee' else ee''
    where ee' = eval env e'
          ee'' = eval env e''
-eval env (Elt e e') = if cond then 1 else 0
-   where cond = (eval env e) < (eval env e')
-eval env (Eeq e e') = if cond then 1 else 0
-   where cond = (eval env e) == (eval env e')
-eval env (Enot e) = if cond then 0 else 1
+eval env (Elt e e') = if cond then B True else B False
+   where cond = (eToInt env e) < (eToInt env e')
+eval env (Eeq e e') = if cond then B True else B False
+   where cond = (eToInt env e) == (eToInt env e')
+eval env (Enot e) = if cond then B False else B True
    where cond = eToBool env e
 eval env (Ehd (Econs e _)) = eval env e
-eval env (Etl (Econs _ e)) = case e of
-                              Econs _ e -> eval env (Etl e)
-                              otherwise -> eToInt env e
-eval env (Econs e e') = undefined
+eval env (Etl (Econs _ e)) = eval env e
+eval env (Econs e e') = L (eval env e) (eval env e')
 
 interpret :: Env -> C -> Env
 interpret env Cskip = env

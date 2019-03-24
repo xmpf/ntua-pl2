@@ -77,7 +77,7 @@ tReplace ta tb ((ta', tb') : c) c' = tReplace ta tb c ((ta'', tb'') : c')
         tb'' = replace ta tb tb'
         replace a b c@(Tvar d) = case (a == c) of
                                   True -> b
-                                  False -> c
+                                  _    -> c
         replace a b c@(Tfun e' e'') = Tfun (replace a b e') (replace a b e'')
 
 -- unify W algorithm
@@ -99,7 +99,7 @@ sub1 ta@(Tvar a) r =
     where replace :: Type -> Type -> Type -> Type
           replace a b c@(Tvar d) = case (a == c) of
                                       True -> b
-                                      False -> c
+                                      _    -> c
           replace a b c@(Tfun e' e'') = Tfun (replace a b e') (replace a b e'')
 
 sub' :: Type -> Constraints -> Maybe Type
@@ -116,7 +116,7 @@ enumTypes t = Just (sub1 t (fst sorted_types))
           enumList t@(Tvar a) counter subs =
             case lookup t subs of
                 Just t -> (subs, counter)
-                Nothing -> (((t, Tvar counter) : subs), counter + 1)
+                _      -> (((t, Tvar counter) : subs), counter + 1)
           enumList t@(Tfun t1 t2) counter subs =
             let (subs1, counter1) = enumList t1 counter subs
                 (subs2, counter2) = enumList t2 counter1 subs1

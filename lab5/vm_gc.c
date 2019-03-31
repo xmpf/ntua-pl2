@@ -19,7 +19,40 @@
 #include <string.h>
 #include <assert.h>
 
-#define NEXT_INSTR goto *(vm->code[vm->pc])
+#include "vm.h"
+#include "gc.h"
+
+extern int errno;
+
+#ifndef DEBUG
+#define DEBUG 0
+#endif
+
+#define NEXT_INSTR  goto *(labels[*pc])
+
+static inline void test(const char *msg) {
+    if (DEBUG) printf ("%s\n", msg);
+}
+
+static inline uint32_t uf1b(char *mpos){
+    return (uint32_t)( *( (uint8_t *)mpos ) );
+}
+
+static inline uint32_t uf2b(char *mpos){
+    return (uint32_t)( *( (uint16_t *)mpos ) );
+}
+
+static inline int32_t sf1b(char *mpos){
+    return (int32_t)( *( (int8_t *)mpos ) );
+}
+
+static inline int32_t sf2b(char *mpos){
+    return (int32_t)( *( (int16_t *)mpos ) );
+}
+
+static inline int32_t sf4b(char *mpos){
+    return *( (int32_t *)mpos );
+}
 
 /* OPCODES */
 typedef enum {
@@ -55,202 +88,6 @@ typedef enum {
 } OPCODE;
 /******************/
 
-typedef enum {
-    HEAP_INT,
-    HEAP_CELL
-} hObjType;
-
-typedef struct heap_object_t {
-    // type of object in heap
-    hObjType    type;
-    // mark bit
-    bool        mark;
-
-    // next object in heap
-    struct heap_object_t *next;
-
-    // type punning
-    union {
-        // HEAP_INT
-        int val;
-
-        // HEAP_CELL
-        struct {
-            struct heap_object_t *hd;
-            struct heap_object_t *tl;
-        };
-    };
-
-} hObject;
-
-/* VM STRUCTURE */
-#define STACK_MAX (1 << 16)
-typedef struct vm_instance_t {
-    // array of pointers to hObject structs
-    hObject *stack[STACK_MAX];
-    // stack size
-    size_t  size;
-    // root object
-    hObject *fst;
-    // total allocated objects
-    size_t  total;
-    // trigger GC
-    size_t  bound;
-
-    // program counter
-    uint32_t pc;
-    // pointer to code section
-    uint64_t *code;
-} VM;
-
-VM *CREATE_VM (void)
-{
-    errno = 0;
-    VM *vm = (VM *)malloc(1 * sizeof(VM));
-    if  (vm == NULL ) { // if error abort
-        perror ("Unable to create VM");
-        exit (EXIT_FAILURE);
-    }
-
-    // initial values
-    vm->size = 0;
-    vm->fst = NULL;
-    vm->total = 0;
-    vm->bound = 100;
-
-    // program counter
-    vm->pc = 0;
-
-    // return address of VM structure
-    return vm;
-}
-
-void VM_STACK_PUSH (VM *vm, hObject *obj)
-{
-    assert (vm->size < STACK_MAX);
-    vm->stack[vm->size] = obj;
-    vm->size += 1;
-}
-
-hObject *VM_STACK_POP (VM *vm)
-{
-    vm->size -= 1;
-    assert (vm->size >= 0);
-    return vm->stack[vm->size];
-}
-
-void MARK (hObject *obj)
-{
-    // if marked return
-    if ( obj->mark ) { return; }
-    // else mark it
-    obj->mark = 1;
-    // if CELL mark HEAD and TAIL too
-    if ( obj->type == HEAP_CELL ) {
-        MARK (obj->hd);
-        MARK (obj->tl);
-    }
-}
-
-void MARK_ALL (VM *vm)
-{
-    static size_t i = 0;
-    for (i = 0; i < vm->size; i++) {
-        MARK (vm->stack[i]);
-    }
-}
-
-void SWEEP (VM *vm)
-{
-    hObject **obj = &(vm->fst);
-    while ( *obj != NULL ) {
-        if ( (*obj)->mark == false ) {
-            // Unreachable object => remove
-            hObject *unreachable = *obj;
-            *obj = unreachable->next;
-            free (unreachable);
-            unreachable = NULL;
-            vm->total -= 1;
-        } else {
-            // Unmark it and continue
-            (*obj)->mark = false;
-            obj = &(*obj)->next;
-        }
-    }
-}
-
-void RUN_GC (VM *vm)
-{
-    size_t total = vm->total;
-    MARK_ALL (vm);
-    SWEEP (vm);
-    // Inrease capacity
-    vm->bound = 4 * vm->total;
-}
-
-hObject *newObject (VM *vm, hObjType type)
-{
-    // create an object with type
-    if (vm->total == vm->bound) { RUN_GC (vm); }
-
-    errno = 0;
-    hObject *obj = (hObject *)malloc(1 * sizeof (hObject));
-    if ( obj == NULL ) {
-        perror ("Unable to create object");
-        exit (EXIT_FAILURE);
-    }
-    obj->type = type;
-    obj->next = vm->fst;
-    vm->fst = obj;
-    obj->mark = false;
-    vm->total += 1;
-
-    return obj;
-}
-
-void VM_STACK_PUSH_INT (VM *vm, int value)
-{
-    hObject *obj = newObject (vm, HEAP_INT);
-    obj->val = value;
-    VM_STACK_PUSH (vm, obj);
-}
-
-hObject* VM_STACK_PUSH_CELL (VM *vm)
-{
-    hObject *obj = newObject (vm, HEAP_CELL);
-    obj->tl = VM_STACK_POP (vm);
-    obj->hd = VM_STACK_POP (vm);
-
-    VM_STACK_PUSH (vm, obj);
-    return obj;
-}
-
-void DESTROY_VM (VM *vm)
-{
-    vm->size = 0;
-    RUN_GC (vm);
-    free (vm);
-    vm = NULL;
-}
-
-void STACK_PUSH (int64_t *stack, int32_t esp, int64_t elem)
-{
-    assert (esp < STACK_MAX);
-    stack[++esp] = elem;
-}
-
-int64_t STACK_POP (int64_t *stack, int32_t esp)
-{
-    assert (esp > 0);
-    return stack[esp--];
-}
-
-/* Function Prototypes */
-static inline uint8_t  get_byte(VM *);
-static inline uint16_t get_2bytes(VM *);
-static inline uint32_t get_4bytes(VM *);
-/***********************/
-
 void usageMsg (char *vmExecName)
 {
     printf("Usage: %s <file to run> \n", vmExecName);
@@ -264,6 +101,10 @@ int main (int argc, char *argv[])
         usageMsg (argv[0]);
         exit (EXIT_FAILURE);
     }
+
+    #if DEBUG
+    printf ("Main...\n");
+    #endif
 
     /** You can get the address of a label defined in the current function 
      *  (or a containing function) with the unary operator ‘&&’. The value has type void *.
@@ -287,58 +128,68 @@ int main (int argc, char *argv[])
         &&L_CONS, &&L_HD, &&L_TL  /* 0x30 .. 0x32 */
     };
 
-    /**
-     * Defines how many bytes contain data for each opcode
-     */
-    static const uint8_t op_bytes[] = {
+    /* Defines how many bytes contain data for each opcode */
+    static const int op_bytes[] = {
         0, 2, 2, 1, 1, 0, 4, 2, 1, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0
     };
     
-    /**
-     *  Create VM and more ...
-     **/
-    VM *vm = CREATE_VM ();
-    uint64_t text[1 << 16];     /* source code */
-    
-    int64_t  stack[1 << 16];    /* stack */
-    register int32_t esp;       /* stack top index */
+    /* Create VM and more ... */
+    VM *vm = CREATE_VM();
+    #if DEBUG
+    printf ("VM created...\n");
+    #endif
+    unsigned char code[STACK_MAX];
+    memset (code, 0, STACK_MAX);
 
-    vm->code = text;
-    static uint16_t len = 0;
-    uint8_t byte, op_byte;
-    uint8_t opcode;
+    static int len = 0;
+    char *pc = NULL;
+    int byte, op_byte, opcode;
 
-    /**
-     *  Parse source-code
-     */
+    /* Parse source-code */
     errno = 0;
-    FILE *code = fopen (argv[1], "rb");
-    if ( code == NULL || errno != 0 ) {
+    FILE *f = fopen (argv[1], "rb");
+    if ( f == NULL || errno != 0 ) {
         perror ("Unable to open file...");
         exit (EXIT_FAILURE);
     }
-    while( fscanf(code, "%c", &opcode) == 1 ) { // WHILE NOT EOF OR ERROR
-        vm->code[len] = (uint64_t)labels[opcode];
-        len += 1;
+    #if DEBUG
+    printf ("File opened...\n");
+    #endif
+
+    len = 0;
+    while(!feof(f))
+        len += fread(code, sizeof(char), STACK_MAX, f);
+    fclose(f);
+/*
+    while( fscanf(f, "%c", &opcode) == 1 ) { // WHILE NOT EOF OR ERROR
+        code[len++] = labels[opcode];
         
-        /* GET THE DATA */
+        // GET THE DATA
         for (byte = 0; byte < op_bytes[opcode]; byte++) {
-            if ( fscanf(code, "%c", &op_byte) != 1 ) { return EXIT_FAILURE; }
-            vm->code[len] = op_byte;
-            len += 1;
+            if ( fscanf(f, "%c", &op_byte) != 1 ) {
+                printf ("Error reading opcodes...\n");
+                return EXIT_FAILURE; 
+            }
+            code[len++] = op_byte;
         }
     }
+*/
+    #if DEBUG
+    printf ("Parsing done...\n");
+    #endif
+
+    pc = &code[0];
 
 /* VM STARTED INTERPRETING BYTECODE */
     clock_t vm_start = clock();
 
 // --------------------------[INTERPRETER]--------------------------------
-    NEXT_INSTR;     /* SEGMENTATION FAULT */
-                    /* OUT OF BOUNDS MEMORY ACCESS */
+    NEXT_INSTR;
 
 /* HALT MACHINE */
 L_HALT:
@@ -348,58 +199,55 @@ L_HALT:
     #endif
     goto L_CLEANUP;
 }
+
 /* UNCONDITIONAL JUMP */
 L_JMP:
 {
     #if DEBUG
     printf ("JMP\n");
     #endif
-    vm->pc = (uint32_t)get_2bytes(vm);
-
+    pc = &code[uf2b(pc+1)];
     NEXT_INSTR;
 }
+
 /* JUMP IF NOT ZERO */
 L_JNZ:
 {
     #if DEBUG
     printf ("JNZ\n");
     #endif
-    if ( stack[esp] ) {
-        vm->pc = (uint32_t)get_2bytes(vm);
-    } else { 
-        vm->pc += 3;
-    }
+    int a = objectValue( VM_POP(vm) );
+    if ( a != 0 ) { pc = &code[uf2b(pc + 1)]; } 
+    else { pc += 3; }
     NEXT_INSTR;
 }
-/* DUPLICATES ELEMENT */
+
+/* TODO: DUPLICATES ELEMENT */
 L_DUP:
+{
     #if DEBUG
     printf ("DUP\n");
     #endif
-    vm->pc += 2;
-
-    uint32_t offset = (uint32_t)get_byte(vm);
-    uint32_t loc = esp - offset;
-    if (offset > esp) { loc = 0; }
-    int32_t  element = stack[loc];
-    STACK_PUSH(stack, esp, element);
+    //test ("This doesn't work L_DUP");
+    int offset = vm->size - uf1b(pc + 1) - 1;
+    if (offset < 0) { 
+        printf ("Warning: Negative offset");
+        offset = 0; 
+    }
+    Object *obj = vm->stack[offset];
+    VM_PUSH (vm, obj);
+    pc += 2;
     NEXT_INSTR;
+}
 
-/* SWAP TOP ELEMENT WITH iTH ELEMENT */
+/* TODO: SWAP TOP ELEMENT WITH iTH ELEMENT */
 L_SWAP:
 {   
     #if DEBUG
     printf ("SWAP\n");
     #endif
-    vm->pc += 2;
-
-    uint32_t offset = (uint32_t)get_byte(vm);
-    uint32_t loc = esp - offset;
-    if (offset > esp) { loc = 0; }
-    int32_t element = stack[loc];
-    int32_t temp = stack[esp];
-    stack[loc] = temp;
-    stack[esp] = element;
+    /* TODO */
+    pc += 2;
     NEXT_INSTR;
 }
 
@@ -409,9 +257,9 @@ L_DROP:
     #if DEBUG
     printf ("DROP\n");
     #endif
-    vm->pc += 1;
-
-    esp -= 1;
+    VM_POP (vm);
+    /* TODO */
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -421,10 +269,10 @@ L_PUSH4:
     #if DEBUG
     printf ("PUSH4\n");
     #endif
-    vm->pc += 5;
-
-    int32_t element32 = (int32_t)get_4bytes(vm);
-    STACK_PUSH(stack, esp,  element32);
+    /* TODO */
+    int element32 = 0;
+    PUSH_INT (vm, element32);
+    pc += 5;
     NEXT_INSTR;
 }
 
@@ -434,10 +282,10 @@ L_PUSH2:
     #if DEBUG
     printf ("PUSH2\n");
     #endif
-    vm->pc += 3;
-
-    int16_t element16 = (int16_t)get_2bytes(vm);
-    STACK_PUSH(stack, esp,  (int32_t)element16);
+    /* TODO */
+    int element16 = 0;
+    PUSH_INT (vm, element16);
+    pc += 3;
     NEXT_INSTR;
 }
 
@@ -447,10 +295,9 @@ L_PUSH:
     #if DEBUG
     printf ("PUSH\n");
     #endif
-    vm->pc += 2;
-
-    int8_t element8 = (int8_t)get_byte(vm);
-    STACK_PUSH(stack, esp,  (int32_t)element8);
+    int element8 = sf1b(pc + 1);
+    PUSH_INT (vm, element8);
+    pc += 2;
     NEXT_INSTR;
 }
 
@@ -460,10 +307,10 @@ L_ADD:
     #if DEBUG
     printf ("ADD\n");
     #endif
-    vm->pc += 1;
-    
-    stack[esp - 1] += stack[esp];
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a + b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -473,10 +320,15 @@ L_SUB:
     #if DEBUG
     printf ("SUB\n");
     #endif
-    vm->pc += 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    
+    #if DEBUG
+    printf ("a = %d , b = %d\n", a, b);
+    #endif
 
-    stack[esp - 1] -= stack[esp];
-    esp -= 1;
+    PUSH_INT (vm, a - b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -486,10 +338,10 @@ L_MUL:
     #if DEBUG
     printf ("MUL\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] *= stack[esp];
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a * b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -499,10 +351,10 @@ L_DIV:
     #if DEBUG
     printf ("DIV\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] /= stack[esp];
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a / b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -512,10 +364,10 @@ L_MOD:
     #if DEBUG
     printf ("MOD\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] %= stack[esp];
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a % b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -525,10 +377,10 @@ L_EQ:
     #if DEBUG
     printf ("EQ\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] = ( stack[esp] == stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a == b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -538,10 +390,10 @@ L_NE:
     #if DEBUG
     printf ("NE\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] = ( stack[esp] != stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a != b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -551,10 +403,10 @@ L_LT:
     #if DEBUG
     printf ("LT\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] = ( stack[esp] > stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a < b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -564,10 +416,10 @@ L_GT:
     #if DEBUG
     printf ("GT\n");
     #endif    
-    vm->pc += 1;
-
-    stack[esp - 1] = ( stack[esp] < stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a > b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -577,10 +429,10 @@ L_LE:
     #if DEBUG
     printf ("LE\n");
     #endif
-    vm->pc += 1    ;
-    // current opcode
-    stack[esp - 1] = ( stack[esp] >= stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue( VM_POP(vm) );
+    int a = objectValue( VM_POP(vm) );
+    PUSH_INT (vm, a <= b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -590,10 +442,10 @@ L_GE:
     #if DEBUG
     printf ("GE\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] = ( stack[esp] <= stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue ( VM_POP(vm) );
+    int a = objectValue ( VM_POP(vm) );
+    PUSH_INT (vm, a >= b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -603,9 +455,9 @@ L_NOT:
     #if DEBUG
     printf ("NOT\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp] = !(stack[esp]);
+    int a = objectValue ( VM_POP(vm) );
+    PUSH_INT (vm, !a);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -615,10 +467,10 @@ L_AND:
     #if DEBUG
     printf ("AND\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] = ( stack[esp] && stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue ( VM_POP(vm) );
+    int a = objectValue ( VM_POP(vm) );
+    PUSH_INT (vm, a && b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -628,10 +480,10 @@ L_OR:
     #if DEBUG
     printf ("OR\n");
     #endif
-    vm->pc += 1;
-
-    stack[esp - 1] = ( stack[esp] || stack[esp - 1] );
-    esp -= 1;
+    int b = objectValue ( VM_POP(vm) );
+    int a = objectValue ( VM_POP(vm) );
+    PUSH_INT (vm, a || b);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -641,14 +493,13 @@ L_IN:
     #if DEBUG
     printf ("INPUT\n");
     #endif
-    vm->pc += 1;
-
     int c;
     if ( fscanf(stdin, "%d", &c) != 1 ) {
         fprintf (stderr, "Unable to read from stdin\n");
         return EXIT_FAILURE;
     }
-    STACK_PUSH(stack, esp, (int32_t)c);
+    PUSH_INT (vm, c);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -658,10 +509,9 @@ L_OUT:
     #if DEBUG
     printf ("OUTPUT\n");
     #endif
-    vm->pc += 1;
-
-    int32_t c = STACK_POP(stack, esp);
+    int c = objectValue( VM_POP(vm) );
     fprintf (stdout, "%c", (char)c);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -680,10 +530,9 @@ L_CLOCK:
     #if DEBUG
     printf ("CLOCK\n");
     #endif
-    vm->pc += 1;
-
     double time_spent = (double)( clock() - vm_start ) / CLOCKS_PER_SEC;
     printf("%.6lf\n", time_spent);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -692,7 +541,7 @@ L_CONS:
     #ifdef __DEBUG__
         printf("CONS\n");
     #endif    
-
+    PUSH_PAIR (vm);
 }
 
 L_HD:
@@ -700,8 +549,9 @@ L_HD:
     #ifdef __DEBUG__
         printf("HD\n");
     #endif    
-    
-
+    Object *obj = VM_POP (vm);
+    int val = objectValue (obj->head);
+    PUSH_INT (vm, val);
 }
 
 L_TL:
@@ -709,11 +559,9 @@ L_TL:
     #ifdef __DEBUG__
         printf("TL\n");
     #endif    
-
-
+    Object *obj = VM_POP (vm);
+    VM_PUSH (vm, obj->tail);
 }
-
-// -----------------------------------------------------------------
 
 L_CLEANUP:
 {
@@ -721,40 +569,11 @@ L_CLEANUP:
     clock_t vm_end = clock();
     printf ("Interpreted in %lf\n", ((double)(vm_end - vm_start) / CLOCKS_PER_SEC));
 
-	#if DEBUG
-		if (esp <= 0) printf("stack[-1] = ...\n");
-		else {
-			for (int32_t j = esp; j >= 0; j--){
-				printf("stack[%d] = %d\n", j, stack[j]);
-			}
-		}
-	#endif
-
     DESTROY_VM(vm);
 }
 
-
+    #if DEBUG
+    printf ("Done...\n");
+    #endif
     return 0;
-}
-
-/**
- * Helper functions to retrieve group of bytes
-*/
-static inline uint8_t get_byte(VM *vm)
-{
-    return (uint32_t)(vm->code[vm->pc + 1]);
-}
-
-static inline uint16_t get_2bytes(VM *vm)
-{
-    return (uint16_t)((vm->code[vm->pc + 2]) << 8 | 
-                      (vm->code[vm->pc + 1]));
-}
-
-static inline uint32_t get_4bytes(VM *vm)
-{
-    return (uint32_t)((vm->code[vm->pc + 4] << 24) | 
-                      (vm->code[vm->pc + 3] << 16) | 
-                      (vm->code[vm->pc + 2] << 8)  |
-                      (vm->code[vm->pc + 1]));
 }

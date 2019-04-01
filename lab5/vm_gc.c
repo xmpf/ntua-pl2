@@ -88,18 +88,22 @@ typedef enum {
 } OPCODE;
 /******************/
 
-void usageMsg (char *vmExecName)
+void runTests (void)
 {
-    printf("Usage: %s <file to run> \n", vmExecName);
-    printf("Example: ./vm example.b\n\n");
+    VM *vm = CREATE_VM ();
+    for (int i = 0; i < STACK_MAX; i++) {
+        PUSH_INT (vm, i);
+        if (i % 4 == 0) { VM_POP (vm); };
+    }
+    DESTROY_VM (vm);
 }
 
 int main (int argc, char *argv[])
 {
 
     if (argc != 2) {
-        usageMsg (argv[0]);
-        exit (EXIT_FAILURE);
+        runTests();
+        return 0;
     }
 
     #if DEBUG

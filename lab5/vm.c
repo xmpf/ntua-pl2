@@ -1,6 +1,10 @@
 #include <errno.h>
 #include "vm.h"
 
+#define GC_CHECK do {\
+    if (vm->total >= vm->threshold) { RUN_GC (vm); }\
+} while(0)
+
 extern int errno;
 
 // Return an instance of VM
@@ -31,6 +35,8 @@ void VM_PUSH (VM *vm, Object *obj)
     }
     vm->stack[vm->size] = obj;
     vm->size += 1;
+
+    GC_CHECK;
 }
 
 // Pop element from stack
@@ -150,11 +156,10 @@ void SWEEP (VM *vm)
 // Run Garbage Collector
 void RUN_GC (VM *vm)
 {
-    int total = vm->total;
     MARK_ALL (vm);
     SWEEP (vm);
 
     // Inrease capacity
     vm->threshold = (vm->total << 1);
-    printf ("Collected: %d\nTotal: %d\n", (total - vm->total), vm->total);
+    if (vm->threshold >= STACK_MAX ) { vm->threshold = STACK_MAX; }
 }

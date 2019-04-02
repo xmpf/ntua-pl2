@@ -30,10 +30,6 @@ extern int errno;
 
 #define NEXT_INSTR  goto *(labels[*pc])
 
-static inline void test(const char *msg) {
-    if (DEBUG) printf ("%s\n", msg);
-}
-
 static inline uint32_t uf1b(char *mpos){
     return (uint32_t)( *( (uint8_t *)mpos ) );
 }
@@ -150,9 +146,8 @@ int main (int argc, char *argv[])
     unsigned char code[STACK_MAX];
     memset (code, 0, STACK_MAX);
 
-    static int len = 0;
+    unsigned int len = 0;
     char *pc = NULL;
-    int byte, op_byte, opcode;
 
     /* Parse source-code */
     errno = 0;
@@ -169,20 +164,7 @@ int main (int argc, char *argv[])
     while(!feof(f))
         len += fread(code, sizeof(char), STACK_MAX, f);
     fclose(f);
-/*
-    while( fscanf(f, "%c", &opcode) == 1 ) { // WHILE NOT EOF OR ERROR
-        code[len++] = labels[opcode];
-        
-        // GET THE DATA
-        for (byte = 0; byte < op_bytes[opcode]; byte++) {
-            if ( fscanf(f, "%c", &op_byte) != 1 ) {
-                printf ("Error reading opcodes...\n");
-                return EXIT_FAILURE; 
-            }
-            code[len++] = op_byte;
-        }
-    }
-*/
+
     #if DEBUG
     printf ("Parsing done...\n");
     #endif
@@ -232,7 +214,6 @@ L_DUP:
     #if DEBUG
     printf ("DUP\n");
     #endif
-    //test ("This doesn't work L_DUP");
     int offset = vm->size - uf1b(pc + 1) - 1;
     if (offset < 0) { 
         printf ("Warning: Negative offset");
@@ -250,7 +231,15 @@ L_SWAP:
     #if DEBUG
     printf ("SWAP\n");
     #endif
-    /* TODO */
+    int offset = vm->size - uf1b(pc + 1) - 1;
+    if (offset < 0) { 
+        printf ("Warning: Negative offset");
+        offset = 0; 
+    }
+    Object *obj = vm->stack[offset];
+    Object *tmp = vm->stack[vm->size];
+    vm->stack[vm->size] = obj;
+    obj = tmp;
     pc += 2;
     NEXT_INSTR;
 }
@@ -262,7 +251,6 @@ L_DROP:
     printf ("DROP\n");
     #endif
     VM_POP (vm);
-    /* TODO */
     pc += 1;
     NEXT_INSTR;
 }
@@ -273,8 +261,7 @@ L_PUSH4:
     #if DEBUG
     printf ("PUSH4\n");
     #endif
-    /* TODO */
-    int element32 = 0;
+    int element32 = sf4b(pc + 1);
     PUSH_INT (vm, element32);
     pc += 5;
     NEXT_INSTR;
@@ -287,7 +274,7 @@ L_PUSH2:
     printf ("PUSH2\n");
     #endif
     /* TODO */
-    int element16 = 0;
+    int element16 = sf2b(pc + 1);
     PUSH_INT (vm, element16);
     pc += 3;
     NEXT_INSTR;

@@ -26,19 +26,12 @@
 #endif
 
 /* MACROS */
-#define NEXT_INSTR  goto *(code[vm.pc])
+#define NEXT_INSTR  goto *(labels[*pc])
 
 #define TEST printf("I AM HERE %d\n", __LINE__)
 
 #define STACK_MAX (1 << 16)     /* 64 KB */
 #define CODE_MAX  (1 << 16)     /* 64 KB */
-
-/* Data Structures */
-
-/* ARRAY CODE SECTION */
-typedef struct {
-    uint32_t  pc;        /* VM's PROGRAM COUNTER */
-} VM;
 
 /* OPCODES */
 typedef enum {
@@ -72,13 +65,30 @@ typedef enum {
 } OPCODE;
 /******************/
 
-/* Function Prototypes */
-static inline void STACK_PUSH(int32_t *, uint16_t *, int32_t);      /* MODIFIES ERRNO */
-static inline int32_t STACK_POP(int32_t *, uint16_t *);             /* MODIFIES ERRNO */
-static inline int32_t STACK_PEEK(int32_t *, uint16_t);            /* MODIFIES ERRNO */
-static inline uint8_t  get_byte(uint64_t[], uint16_t);
-static inline uint16_t get_2bytes(uint64_t[], uint16_t);
-static inline uint32_t get_4bytes(uint64_t[], uint16_t);
+static inline void STACK_PUSH(int32_t *stack, uint16_t *stackTop, int32_t value);
+static inline int32_t STACK_POP(int32_t *stack, uint16_t *stackTop);
+static inline int32_t STACK_PEEK(int32_t *stack, uint16_t stackTop);
+
+/******************/
+static inline uint32_t uf1b(char *mpos){
+    return (uint32_t)( *( (uint8_t *)mpos ) );
+}
+
+static inline uint32_t uf2b(char *mpos){
+    return (uint32_t)( *( (uint16_t *)mpos ) );
+}
+
+static inline int32_t sf1b(char *mpos){
+    return (int32_t)( *( (int8_t *)mpos ) );
+}
+
+static inline int32_t sf2b(char *mpos){
+    return (int32_t)( *( (int16_t *)mpos ) );
+}
+
+static inline int32_t sf4b(char *mpos){
+    return *( (int32_t *)mpos );
+}
 /***********************/
 
 void usageMsg (char *vmExecName)
@@ -94,9 +104,7 @@ int main (int argc, char *argv[])
         exit (EXIT_FAILURE);
     }
     
-    /* declare our VM */
-    VM vm;
-    vm.pc = 0;
+    char *pc = NULL;
 
     /* open file with bytecode */
     errno = 0;
@@ -141,28 +149,18 @@ int main (int argc, char *argv[])
      *  Load bytecode into array
      */
     
-    static uint64_t code[CODE_MAX] = {0};
-    static uint16_t len = 0;    /* 16 bits */
-    uint8_t byte, op_byte;
+    unsigned char code[CODE_MAX] = {0};
     
-    while( fscanf(file, "%c", &byte) == 1 ) { // WHILE NOT EOF OR ERROR
-
-        /* GET BYTECODE */
-        code[len] = (uint64_t)labels[byte];
-        len += 1;
-        
-        /* GET THE DATA */
-        for (int ix = 0; ix < op_bytes[byte]; ix++) {
-            if ( fscanf(file, "%c", &op_byte) != 1 ) { return EXIT_FAILURE; }
-            code[len] = op_byte;
-            len += 1;
-        }
-    }
-    fclose (file);
+    unsigned int len = 0;
+    while(!feof(file))
+        len += fread(code, sizeof(char), STACK_MAX, file);
+    fclose(file);
 
     /* Initialize Stack */
     static int32_t stack[STACK_MAX] = {0};
     static uint16_t stackTop = 0;
+
+    pc = &code[0];
 
     /* VM STARTED INTERPRETING BYTECODE */
     clock_t vm_start = clock();
@@ -185,8 +183,7 @@ L_JMP:
     #if DEBUG
     printf ("JMP\n");
     #endif
-    vm.pc = (uint32_t)get_2bytes(code, vm.pc);
-
+    pc =  &code[ uf2b(pc + 1) ];
     NEXT_INSTR;
 }
 /* JUMP IF NOT ZERO */
@@ -196,9 +193,9 @@ L_JNZ:
     printf ("JNZ\n");
     #endif
     if ( stack[stackTop] ) {
-        vm.pc = (uint32_t)get_2bytes(code, vm.pc);
+        pc = &code[uf2b(pc + 1)];
     } else { 
-        vm.pc += 3;
+        pc += 3;
     }
     NEXT_INSTR;
 }
@@ -207,13 +204,12 @@ L_DUP:
     #if DEBUG
     printf ("DUP\n");
     #endif
-    vm.pc += 2;
-
-    uint32_t offset = (uint32_t)get_byte(code, vm.pc);
-    uint32_t loc = stackTop - offset;
+    int32_t offset = sf1b (pc + 1);
+    int32_t loc = stackTop - offset;
     if (offset > stackTop) { loc = 0; }
     int32_t  element = stack[loc];
     STACK_PUSH(stack, &stackTop, element);
+    pc += 2;
     NEXT_INSTR;
 
 /* SWAP TOP ELEMENT WITH iTH ELEMENT */
@@ -222,15 +218,14 @@ L_SWAP:
     #if DEBUG
     printf ("SWAP\n");
     #endif
-    vm.pc += 2;
-
-    uint32_t offset = (uint32_t)get_byte(code, vm.pc);
+    uint32_t offset = sf1b (pc + 1);
     uint32_t loc = stackTop - offset;
     if (offset > stackTop) { loc = 0; }
     int32_t element = stack[loc];
     int32_t temp = stack[stackTop];
     stack[loc] = temp;
     stack[stackTop] = element;
+    pc += 2;
     NEXT_INSTR;
 }
 
@@ -240,9 +235,8 @@ L_DROP:
     #if DEBUG
     printf ("DROP\n");
     #endif
-    vm.pc += 1;
-
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -252,10 +246,9 @@ L_PUSH4:
     #if DEBUG
     printf ("PUSH4\n");
     #endif
-    vm.pc += 5;
-
-    int32_t element32 = (uint32_t)get_4bytes(code, vm.pc);
+    int32_t element32 = sf4b (pc + 1);
     STACK_PUSH(stack, &stackTop, element32);
+    pc += 5;
     NEXT_INSTR;
 }
 
@@ -265,10 +258,9 @@ L_PUSH2:
     #if DEBUG
     printf ("PUSH2\n");
     #endif
-    vm.pc += 3;
-
-    int16_t element16 = (int16_t)get_2bytes(code, vm.pc);
+    int32_t element16 = sf2b(pc + 1);
     STACK_PUSH(stack, &stackTop, (int32_t)element16);
+    pc += 3;
     NEXT_INSTR;
 }
 
@@ -278,10 +270,9 @@ L_PUSH:
     #if DEBUG
     printf ("PUSH\n");
     #endif
-    vm.pc += 2;
-
-    int8_t element8 = (int8_t)get_byte(code, vm.pc);
-    STACK_PUSH(stack, &stackTop, (int32_t)element8);
+    int32_t element8 = sf1b (pc + 1);
+    STACK_PUSH(stack, &stackTop, element8);
+    pc += 2;
     NEXT_INSTR;
 }
 
@@ -291,10 +282,9 @@ L_ADD:
     #if DEBUG
     printf ("ADD\n");
     #endif
-    vm.pc += 1;
-    
     stack[stackTop - 1] += stack[stackTop];
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -304,10 +294,9 @@ L_SUB:
     #if DEBUG
     printf ("SUB\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] -= stack[stackTop];
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -317,10 +306,9 @@ L_MUL:
     #if DEBUG
     printf ("MUL\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] *= stack[stackTop];
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -330,10 +318,9 @@ L_DIV:
     #if DEBUG
     printf ("DIV\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] /= stack[stackTop];
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -343,10 +330,9 @@ L_MOD:
     #if DEBUG
     printf ("MOD\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] %= stack[stackTop];
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -356,10 +342,9 @@ L_EQ:
     #if DEBUG
     printf ("EQ\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] = ( stack[stackTop] == stack[stackTop - 1] );
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -369,10 +354,9 @@ L_NE:
     #if DEBUG
     printf ("NE\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] = ( stack[stackTop] != stack[stackTop - 1] );
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -382,10 +366,9 @@ L_LT:
     #if DEBUG
     printf ("LT\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] = ( stack[stackTop] > stack[stackTop - 1] );
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -395,10 +378,9 @@ L_GT:
     #if DEBUG
     printf ("GT\n");
     #endif    
-    vm.pc += 1;
-
     stack[stackTop - 1] = ( stack[stackTop] < stack[stackTop - 1] );
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -408,10 +390,9 @@ L_LE:
     #if DEBUG
     printf ("LE\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] = ( stack[stackTop] >= stack[stackTop - 1] );
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -421,10 +402,9 @@ L_GE:
     #if DEBUG
     printf ("GE\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] = ( stack[stackTop] <= stack[stackTop - 1] );
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -434,9 +414,8 @@ L_NOT:
     #if DEBUG
     printf ("NOT\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop] = !(stack[stackTop]);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -446,10 +425,9 @@ L_AND:
     #if DEBUG
     printf ("AND\n");
     #endif
-    vm.pc += 1;
-
     stack[stackTop - 1] = ( stack[stackTop] && stack[stackTop - 1] );
     stackTop -= 1;
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -459,7 +437,7 @@ L_OR:
     #if DEBUG
     printf ("OR\n");
     #endif
-    vm.pc += 1;
+    pc += 1;
 
     stack[stackTop - 1] = ( stack[stackTop] || stack[stackTop - 1] );
     stackTop -= 1;
@@ -472,14 +450,13 @@ L_IN:
     #if DEBUG
     printf ("INPUT\n");
     #endif
-    vm.pc += 1;
-
     int c;
     if ( fscanf(stdin, "%d", &c) != 1 ) {
         fprintf (stderr, "Unable to read from stdin\n");
         return EXIT_FAILURE;
     }
     STACK_PUSH(stack, &stackTop, (int32_t)c);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -489,10 +466,9 @@ L_OUT:
     #if DEBUG
     printf ("OUTPUT\n");
     #endif
-    vm.pc += 1;
-
     int32_t c = STACK_POP(stack, &stackTop);
     fprintf (stdout, "%c\n", c);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -511,10 +487,9 @@ L_CLOCK:
     #if DEBUG
     printf ("CLOCK\n");
     #endif
-    vm.pc += 1;
-
     double time_spent = (double)( clock() - vm_start ) / CLOCKS_PER_SEC;
     printf("%.6lf\n", time_spent);
+    pc += 1;
     NEXT_INSTR;
 }
 
@@ -585,25 +560,3 @@ static inline int32_t STACK_PEEK(int32_t *stack, uint16_t stackTop)
     return stack[stackTop - 1];
 }
 // ----------------------------------------------------------
-
-/**
- * Helper functions to retrieve group of bytes
-*/
-static inline uint8_t get_byte(uint64_t code[], uint16_t pc)
-{
-    return (uint8_t)(code[pc + 1] & 0xFF);
-}
-
-static inline uint16_t get_2bytes(uint64_t code[], uint16_t pc)
-{
-    return (uint16_t)((code[pc + 2] & 0xFF) << 8 | 
-                      (code[pc + 1] & 0xFF));
-}
-
-static inline uint32_t get_4bytes(uint64_t code[], uint16_t pc)
-{
-    return (uint32_t)(((code[pc + 4] & 0xFF) << 24) | 
-                      ((code[pc + 3] & 0xFF) << 16) | 
-                      ((code[pc + 2] & 0xFF) << 8)  |
-                      (code[pc + 1] & 0xFF));
-}

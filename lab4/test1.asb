@@ -1,0 +1,12 @@
+# Print message.
+"AA BB CC DD EE FF\n"
+print_message:
+dup 0
+jnz do_print_message
+drop
+jump end_print_message
+do_print_message:
+output
+jump print_message
+end_print_message:
+output

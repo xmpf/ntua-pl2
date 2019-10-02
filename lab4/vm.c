@@ -4,11 +4,7 @@
  * 
  *  Resources:
  *  [1] https://youtu.be/DUNkdl0Jhgs
- *  [2] 
  *  
- *  Questions:
- *      + Better to have global VM, STACK structures instead of passing a pointer?
- *      + Dynamic memory allocation
  */
 
 #include <stdio.h>
@@ -22,14 +18,19 @@
 
 /* DEBUGGING OPTIONS */
 #ifndef DEBUG
-#define DEBUG 1
+#define DEBUG (0)
+#endif
+
+#if DEBUG
+#define TEST() ((fprintf(stderr, "DEBUG: LINE @ %d\n", __LINE__)))
+#else
+#define TEST()
 #endif
 
 /* MACROS */
 #define NEXT_INSTR  goto *(labels[*pc])
 
-#define TEST printf("I AM HERE %d\n", __LINE__)
-
+/* CONSTANTS */
 #define STACK_MAX (1 << 16)     /* 64 KB */
 #define CODE_MAX  (1 << 16)     /* 64 KB */
 
@@ -65,29 +66,29 @@ typedef enum {
 } OPCODE;
 /******************/
 
-static inline void STACK_PUSH(int32_t *stack, uint16_t *stackTop, int32_t value);
-static inline int32_t STACK_POP(int32_t *stack, uint16_t *stackTop);
-static inline int32_t STACK_PEEK(int32_t *stack, uint16_t stackTop);
+static inline void STACK_PUSH(int32_t *stack, int32_t *stackTop, int32_t value);
+static inline int32_t STACK_POP(int32_t *stack, int32_t *stackTop);
+static inline int32_t STACK_PEEK(int32_t *stack, int32_t stackTop);
 
 /******************/
-static inline uint32_t uf1b(char *mpos){
-    return (uint32_t)( *( (uint8_t *)mpos ) );
+static inline uint32_t uf1b(int8_t *mpos) {
+    return (uint32_t)( *( (int8_t *) mpos ) );
 }
 
-static inline uint32_t uf2b(char *mpos){
-    return (uint32_t)( *( (uint16_t *)mpos ) );
+static inline uint32_t uf2b(int8_t *mpos) {
+    return (uint32_t)( *( (int16_t *) mpos ) );
 }
 
-static inline int32_t sf1b(char *mpos){
-    return (int32_t)( *( (int8_t *)mpos ) );
+static inline int32_t sf1b(int8_t *mpos) {
+    return (int32_t)( *( (int8_t *) mpos ) );
 }
 
-static inline int32_t sf2b(char *mpos){
-    return (int32_t)( *( (int16_t *)mpos ) );
+static inline int32_t sf2b(int8_t *mpos) {
+    return (int32_t)( *( (int16_t *) mpos ) );
 }
 
-static inline int32_t sf4b(char *mpos){
-    return *( (int32_t *)mpos );
+static inline int32_t sf4b(int8_t *mpos) {
+    return (int32_t)( *( (int32_t *) mpos ) );
 }
 /***********************/
 
@@ -99,12 +100,14 @@ void usageMsg (char *vmExecName)
 
 int main (int argc, char *argv[])
 {
+    /* Handle correct parameters */
     if (argc != 2) {
         usageMsg (argv[0]);
         exit (EXIT_FAILURE);
     }
     
-    char *pc = NULL;
+    /* ACCESS BYTES */
+    int8_t *pc = NULL;
 
     /* open file with bytecode */
     errno = 0;
@@ -134,9 +137,8 @@ int main (int argc, char *argv[])
         &&L_CLOCK /* 0x2A */
     };
 
-    /**
-     * Defines how many bytes contain data for each opcode
-     */
+    /* Defines how many bytes contain data for each opcode
+    
     static const uint8_t op_bytes[] = {
         0, 2, 2, 1, 1, 0, 4, 2, 1, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -144,30 +146,37 @@ int main (int argc, char *argv[])
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0
     };
+    
+    */
 
-    /**
-     *  Load bytecode into array
-     */
-    
-    unsigned char code[CODE_MAX] = {0};
-    
-    unsigned int len = 0;
-    while(!feof(file))
-        len += fread(code, sizeof(char), STACK_MAX, file);
+    /* Load bytecode */
+    errno = 0;
+    int8_t *code = (int8_t *)calloc(sizeof(int8_t), (int64_t)CODE_MAX * CODE_MAX);
+    if (code == NULL || errno != 0) {
+        TEST();
+        fprintf(stderr, "%s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    int32_t len = 0;
+    while(!feof(file)) {
+        len += fread(code, sizeof(int8_t), CODE_MAX - 1, file);
+        if (len >= CODE_MAX - 1) { TEST(); exit(0); }
+    }
     fclose(file);
+    assert(len > 0);
 
     /* Initialize Stack */
     static int32_t stack[STACK_MAX] = {0};
-    static uint16_t stackTop = 0;
-
+    int32_t stackTop = 0;
+    
+    /* Start from beginning */
     pc = &code[0];
 
     /* VM STARTED INTERPRETING BYTECODE */
     clock_t vm_start = clock();
 
 // --------------------------[INTERPRETER]--------------------------------
-    NEXT_INSTR;     /* SEGMENTATION FAULT */
-                    /* OUT OF BOUNDS MEMORY ACCESS */
+    NEXT_INSTR;
 
 /* HALT MACHINE */
 L_HALT:
@@ -181,7 +190,7 @@ L_HALT:
 L_JMP:
 {
     #if DEBUG
-    printf ("JMP\n");
+    printf ("JMP %x\n", code[  uf2b(pc + 1) ]);
     #endif
     pc =  &code[ uf2b(pc + 1) ];
     NEXT_INSTR;
@@ -190,10 +199,10 @@ L_JMP:
 L_JNZ:
 {
     #if DEBUG
-    printf ("JNZ\n");
+    printf ("JNZ %x\n", code[ uf2b(pc + 1) ]);
     #endif
-    if ( stack[stackTop] ) {
-        pc = &code[uf2b(pc + 1)];
+    if ( stack[stackTop - 1] != 0 ) {
+        pc = &code[ uf2b(pc + 1) ];
     } else { 
         pc += 3;
     }
@@ -202,11 +211,11 @@ L_JNZ:
 /* DUPLICATES ELEMENT */
 L_DUP:
     #if DEBUG
-    printf ("DUP\n");
+    printf ("DUP %d\n", sf1b (pc + 1));
     #endif
+    assert(true);
     int32_t offset = sf1b (pc + 1);
-    int32_t loc = stackTop - offset;
-    if (offset > stackTop) { loc = 0; }
+    int32_t loc = (offset >= stackTop) ? 0 : stackTop - offset - 1;
     int32_t  element = stack[loc];
     STACK_PUSH(stack, &stackTop, element);
     pc += 2;
@@ -216,15 +225,15 @@ L_DUP:
 L_SWAP:
 {   
     #if DEBUG
-    printf ("SWAP\n");
+    printf ("SWAP %d\n", sf1b (pc + 1));
     #endif
-    uint32_t offset = sf1b (pc + 1);
-    uint32_t loc = stackTop - offset;
+    int32_t offset = sf1b (pc + 1);
+    int32_t loc = stackTop - offset;
     if (offset > stackTop) { loc = 0; }
     int32_t element = stack[loc];
-    int32_t temp = stack[stackTop];
+    int32_t temp = stack[stackTop - 1];
     stack[loc] = temp;
-    stack[stackTop] = element;
+    stack[stackTop - 1] = element;
     pc += 2;
     NEXT_INSTR;
 }
@@ -244,7 +253,7 @@ L_DROP:
 L_PUSH4:
 {
     #if DEBUG
-    printf ("PUSH4\n");
+    printf ("PUSH4 %d\n", sf4b (pc + 1));
     #endif
     int32_t element32 = sf4b (pc + 1);
     STACK_PUSH(stack, &stackTop, element32);
@@ -256,7 +265,7 @@ L_PUSH4:
 L_PUSH2:
 {
     #if DEBUG
-    printf ("PUSH2\n");
+    printf ("PUSH2 %d\n", sf2b(pc + 1));
     #endif
     int32_t element16 = sf2b(pc + 1);
     STACK_PUSH(stack, &stackTop, (int32_t)element16);
@@ -268,7 +277,7 @@ L_PUSH2:
 L_PUSH:
 {
     #if DEBUG
-    printf ("PUSH\n");
+    printf ("PUSH1 %d\n", sf1b (pc + 1));
     #endif
     int32_t element8 = sf1b (pc + 1);
     STACK_PUSH(stack, &stackTop, element8);
@@ -280,9 +289,9 @@ L_PUSH:
 L_ADD:
 {
     #if DEBUG
-    printf ("ADD\n");
+    printf ("ADD %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] += stack[stackTop];
+    stack[stackTop - 2] += stack[stackTop - 1];
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -292,9 +301,9 @@ L_ADD:
 L_SUB:
 {
     #if DEBUG
-    printf ("SUB\n");
+    printf ("SUB %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] -= stack[stackTop];
+    stack[stackTop - 2] -= stack[stackTop - 1];
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -304,9 +313,9 @@ L_SUB:
 L_MUL:  
 {
     #if DEBUG
-    printf ("MUL\n");
+    printf ("MUL %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] *= stack[stackTop];
+    stack[stackTop - 2] *= stack[stackTop - 1];
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -316,9 +325,9 @@ L_MUL:
 L_DIV:
 {
     #if DEBUG
-    printf ("DIV\n");
+    printf ("DIV %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] /= stack[stackTop];
+    stack[stackTop - 2] /= stack[stackTop - 1];
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -328,9 +337,9 @@ L_DIV:
 L_MOD:  
 {
     #if DEBUG
-    printf ("MOD\n");
+    printf ("MOD %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] %= stack[stackTop];
+    stack[stackTop - 2] = stack[stackTop - 2] % stack[stackTop - 1];
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -340,9 +349,9 @@ L_MOD:
 L_EQ:   
 {
     #if DEBUG
-    printf ("EQ\n");
+    printf ("EQ %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] = ( stack[stackTop] == stack[stackTop - 1] );
+    stack[stackTop - 2] = ( stack[stackTop - 1] == stack[stackTop - 2] );
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -352,9 +361,9 @@ L_EQ:
 L_NE:   
 {
     #if DEBUG
-    printf ("NE\n");
+    printf ("NE %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] = ( stack[stackTop] != stack[stackTop - 1] );
+    stack[stackTop - 2] = !( stack[stackTop - 1] == stack[stackTop - 2] );
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -364,9 +373,9 @@ L_NE:
 L_LT:   
 {
     #if DEBUG
-    printf ("LT\n");
+    printf ("LT %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] = ( stack[stackTop] > stack[stackTop - 1] );
+    stack[stackTop - 2] = ( stack[stackTop - 2] > stack[stackTop - 1] );
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -376,9 +385,9 @@ L_LT:
 L_GT:   
 {
     #if DEBUG
-    printf ("GT\n");
+    printf ("GT %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif    
-    stack[stackTop - 1] = ( stack[stackTop] < stack[stackTop - 1] );
+    stack[stackTop - 2] = ( stack[stackTop - 2] < stack[stackTop - 1] );
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -388,9 +397,9 @@ L_GT:
 L_LE:   
 {
     #if DEBUG
-    printf ("LE\n");
+    printf ("LE %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] = ( stack[stackTop] >= stack[stackTop - 1] );
+    stack[stackTop - 2] = ( stack[stackTop - 2] >= stack[stackTop - 1] );
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -400,9 +409,9 @@ L_LE:
 L_GE:   
 {
     #if DEBUG
-    printf ("GE\n");
+    printf ("GE %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] = ( stack[stackTop] <= stack[stackTop - 1] );
+    stack[stackTop - 2] = ( stack[stackTop - 2] <= stack[stackTop - 1] );
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -412,9 +421,9 @@ L_GE:
 L_NOT:  
 {
     #if DEBUG
-    printf ("NOT\n");
+    printf ("NOT %d\n", stack[stackTop - 1]);
     #endif
-    stack[stackTop] = !(stack[stackTop]);
+    stack[stackTop - 1] = !(stack[stackTop - 1]);
     pc += 1;
     NEXT_INSTR;
 }
@@ -423,9 +432,12 @@ L_NOT:
 L_AND:  
 {
     #if DEBUG
-    printf ("AND\n");
+    printf ("AND %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
-    stack[stackTop - 1] = ( stack[stackTop] && stack[stackTop - 1] );
+    if (stack[stackTop - 1] != 0 && stack[stackTop - 2] != 0)
+        stack[stackTop - 2] = 1;
+    else
+        stack[stackTop - 2] = 0;
     stackTop -= 1;
     pc += 1;
     NEXT_INSTR;
@@ -435,39 +447,41 @@ L_AND:
 L_OR:   
 {
     #if DEBUG
-    printf ("OR\n");
+    printf ("OR %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
     #endif
     pc += 1;
-
-    stack[stackTop - 1] = ( stack[stackTop] || stack[stackTop - 1] );
+    if (stack[stackTop - 1] == 0 && stack[stackTop - 2] == 0)
+        stack[stackTop - 2] = 0;
+    else
+        stack[stackTop - 2] = 1;
     stackTop -= 1;
     NEXT_INSTR;
 }
 
-/* */
+/* INPUT */
 L_IN:   
 {
     #if DEBUG
     printf ("INPUT\n");
     #endif
-    int c;
+    int32_t c;
     if ( fscanf(stdin, "%d", &c) != 1 ) {
         fprintf (stderr, "Unable to read from stdin\n");
         return EXIT_FAILURE;
     }
-    STACK_PUSH(stack, &stackTop, (int32_t)c);
+    STACK_PUSH(stack, &stackTop, c);
     pc += 1;
     NEXT_INSTR;
 }
 
-/* */
+/* OUTPUT */
 L_OUT:
 {
     #if DEBUG
     printf ("OUTPUT\n");
     #endif
     int32_t c = STACK_POP(stack, &stackTop);
-    fprintf (stdout, "%c\n", c);
+    fprintf (stdout, "%c", c);
     pc += 1;
     NEXT_INSTR;
 }
@@ -502,12 +516,9 @@ L_CLEANUP:
     printf ("Interpreted in %lf\n", ((double)(vm_end - vm_start) / CLOCKS_PER_SEC));
 
 	#if DEBUG
-		if (stackTop <= 0) printf("stack[-1] = ...\n");
-		else {
-			for (int32_t j = stackTop; j >= 0; j--){
-				printf("stack[%d] = %d\n", j, stack[j]);
-			}
-		}
+    for (int32_t j = stackTop - 1; j >= 0; j--) {
+        printf("stack[%d] = %d\n", j, stack[j]);
+    }
 	#endif
 }
 
@@ -519,13 +530,13 @@ L_CLEANUP:
 /**
  *  Push Element into STACK
  */
-static inline void STACK_PUSH(int32_t *stack, uint16_t *stackTop, int32_t value)
+static inline void STACK_PUSH(int32_t *stack, int32_t *stackTop, int32_t value)
 {
     errno = 0;
-    if (*stackTop == STACK_MAX) {
+    if (*stackTop + 1 == STACK_MAX) {
         fprintf(stderr, "STACK FULL :(\n");
         errno = EPERM;
-        return;
+        exit(EXIT_FAILURE);
     }
     stack[*stackTop] = value;
     *stackTop += 1;
@@ -534,7 +545,7 @@ static inline void STACK_PUSH(int32_t *stack, uint16_t *stackTop, int32_t value)
 /** 
  * Pop the top element from STACK
  */
-static inline int32_t STACK_POP(int32_t *stack, uint16_t *stackTop)
+static inline int32_t STACK_POP(int32_t *stack, int32_t *stackTop)
 {
     errno = 0;
     if (*stackTop == 0) {
@@ -549,7 +560,7 @@ static inline int32_t STACK_POP(int32_t *stack, uint16_t *stackTop)
 /**
  *  Read the top element from STACK
  */
-static inline int32_t STACK_PEEK(int32_t *stack, uint16_t stackTop)
+static inline int32_t STACK_PEEK(int32_t *stack, int32_t stackTop)
 {
     errno = 0;
     if (stackTop == 0) {

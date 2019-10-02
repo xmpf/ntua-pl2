@@ -21,7 +21,7 @@ start:
 # Print message.
 "Hello world!\n"
 print_message:
-# dup 0
+dup 0
 jnz do_print_message
 drop
 jump end_print_message
@@ -37,6 +37,7 @@ loop:
 output
 1
 sub
+dup 0
 jnz loop
 drop
 10
@@ -52,7 +53,7 @@ jnz skip_mismatch
 
 "Error: stack operations not working properly!\n"
 print_error_3:
-#dup 0
+dup 0
 jnz do_print_error_3
 drop
 jump end_print_error_3
@@ -70,7 +71,7 @@ halt
 error:
 "Error: halt is not working!\n"
 print_error_2:
-# dup 0
+dup 0
 jnz do_print_error_2
 drop
 jump end_print_error_2

@@ -1,30 +1,42 @@
 /**
  *  Author: Michalis Papadopoullos (03114702)
  *  Homework #4: VM Interpreter
- * 
- *  Resources:
- *  [1] https://youtu.be/DUNkdl0Jhgs
+ *  Homework #5: VM Extension w/ Garbage Allocation
  *  
+ *  For debugging messages compile with:
+ *      g++ -Wall -DDEBUG=1 vm.cpp -o vm_debug
+ *
+ *  make lab5:
+ *      g++ -Wall -DGC=1 vm.cpp -o vm_gc
+ *
+ *  Resources:
+ *  [1] https://youtu.be/DUNkdl0Jhgs  
+ *
  */
 
-#include <stdio.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <time.h>
-#include <string.h>
-#include <assert.h>
+
+#include <iostream>
+#include <cstdio>
+#include <cstdint>
+#include <cstdlib>
+#include <ctime>
+#include <cstring>
+#include <cerrno>
+#include <climits>
 
 /* DEBUGGING OPTIONS */
 #ifndef DEBUG
 #define DEBUG (0)
 #endif
 
+#ifndef GC
+#define GC (0)
+#endif
+
 #if DEBUG
-#define TEST() ((fprintf(stderr, "DEBUG: LINE @ %d\n", __LINE__)))
+#define DBG(msg) ((fprintf(stderr, "DEBUG(%d): %s\n", __LINE__, (msg))))
 #else
-#define TEST()
+#define DBG()
 #endif
 
 /* MACROS */
@@ -63,35 +75,211 @@ typedef enum {
     OP_OUT,             /* OUTPUT */
     OP_UNDEFINED,       /* UNDEFINED */
     OP_CLOCK = 0x2A     /* CLOCK */
+#if GC
+  , OP_CONS = 0x30      /* CONS */
+  , OP_HEAD             /* HEAD */
+  , OP_TAIL             /* TAIL */
+#endif
 } OPCODE;
-/******************/
 
-static inline void STACK_PUSH(int32_t *stack, int32_t *stackTop, int32_t value);
-static inline int32_t STACK_POP(int32_t *stack, int32_t *stackTop);
+/* GC Extension Specific Code */
+#if GC
+
+// Include Vector container
+#include <vector>
+
+// MSB => VALUE || POINTER
+// BIT30 => MARKED || NOT_MARKED
+#define BIT31 (1 << 31)
+#define BIT30 (1 << 30)
+
+// MAKE_ADDRESS
+#define MAKE_ADDRESS(x) (((x) | BIT31) & ~(BIT30))
+
+// CLEAR_FLAGS
+#define CLEAR_FLAGS(x) ((x) & (BIT30 - 1))
+
+// IS_MARKED
+#define IS_MARKED(x) ((x) & BIT30)
+
+// GET OBJ_TYPE BY LOOKING THE MSB
+#define OBJ_TYPE(x) ((x) & BIT31)
+
+// SET MSB TO 1
+#define SET_MSB(x)  ((x) | BIT31)
+
+// Cell structure
+typedef struct cell_t {
+    int32_t next;
+    int32_t head;
+    int32_t tail;
+
+    // Constructors
+    cell_t(int32_t a, int32_t b) {
+        #if DEBUG
+        DBG("cell_t: Constructor called...");
+        #endif
+        this->next = -1;
+        this->head = a;
+        this->tail = b;
+    }
+
+    // Destructor
+    ~cell_t() {
+        #if DEBUG
+        DBG("~cell_t: Destructor called...");
+        #endif
+    }
+
+    // Getters
+    int32_t cell_head() { // get first element
+        return this->head;
+    }
+    int32_t cell_tail() { // get second element
+        return this->tail;
+    }
+    int32_t get_next() { // get next
+        return this->next;
+    }
+    // Setters
+    void set_head(int32_t v) { // set first element
+        this->head = v;
+    }
+    void set_tail(int32_t v) { // set second element
+        this->tail = v;
+    }
+    void set_next(int32_t v) { // set next
+        this->next = v;
+    }
+    void mark_head() { // mark head
+        this->head |= BIT31;
+    }
+    void mark_tail() { // mark tail
+        this->tail |= BIT31;
+    }
+    void unmark_head() { // unamrk head
+        this->head &= ~(BIT31);
+    }
+    void unmark_tail() { // unmark tail
+        this->tail &= ~(BIT31);
+    }
+    void unmark_and_uncheck() {
+        this->head &= ~(BIT30);
+        this->tail &= ~(BIT30);
+    }
+} cell_t;
+
+// Heap structure
+typedef struct heap_t {
+    size_t   size;              /* maybe support to dynamically resize heap */
+    cell_t * cells;             /* memory space for cells */
+    // std::vector<int32_t> pool;  /* pool of indexes of memory locations on stack */
+
+    // Constructor
+    heap_t() {
+        this->size = 0;
+        cells = NULL;
+    }
+
+    heap_t(size_t size) {
+        #if DEBUG
+        DBG("heap_t: Constructor called...");
+        #endif
+
+        this->size = size;
+        errno = 0;
+        this->cells = (cell_t *)malloc(size * sizeof(cell_t));
+        if (cells == NULL || errno != 0) {
+            fprintf(stderr, "heap_t: Unable to allocate memory!\n \
+                             %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+        // Initially, every cell in the heap, points to its next one.
+        for(size_t i = 0; i < size - 1; i++) {
+            this->cells[i].next = i + 1;
+        }
+        // last cell in the heap
+        this->cells[size - 1].next = -1;
+    }
+
+    // Destructor
+    ~heap_t() {
+        #if DEBUG
+        DBG("~heap_t: Destructor called...");
+        #endif
+
+        if( this->cells != NULL ) { free(this->cells); }
+        this->cells = NULL;
+    }
+
+    // Getters
+    size_t get_size() { return this->size; }
+
+    // Setters
+
+    // DFS
+    void DFS(int32_t ix) {
+        // TODO
+    }
+
+    // Garbage Collection
+    int32_t collect() {
+        #if DEBUG
+        DBG("heap_t::collect");
+        #endif
+
+        // TODO
+
+        return 0;
+    }
+
+} heap_t;
+
+/* Functions Prototypes */
+static inline bool is_cell(int32_t);
+
+#endif // GC
+
+/* Function Declarations */
+void    STACK_PUSH(int32_t *stack, int32_t *stackTop, int32_t value);
+int32_t STACK_POP(int32_t *stack, int32_t *stackTop);
 static inline int32_t STACK_PEEK(int32_t *stack, int32_t stackTop);
 
-/******************/
+/* Inline Function Definitions */
 static inline uint32_t uf1b(int8_t *mpos) {
+    // unsigned int from byte
     return (uint32_t)( *( (int8_t *) mpos ) );
 }
 
 static inline uint32_t uf2b(int8_t *mpos) {
+    // unsigned int from two bytes
     return (uint32_t)( *( (int16_t *) mpos ) );
 }
 
 static inline int32_t sf1b(int8_t *mpos) {
+    // signed int from byte
     return (int32_t)( *( (int8_t *) mpos ) );
 }
 
 static inline int32_t sf2b(int8_t *mpos) {
+    // signed int from byte
     return (int32_t)( *( (int16_t *) mpos ) );
 }
 
 static inline int32_t sf4b(int8_t *mpos) {
+    // signed int from four bytes
     return (int32_t)( *( (int32_t *) mpos ) );
 }
-/***********************/
 
+/* Assert with error message */
+void assert_msg(int condition, const char* message) {
+  if (!condition) {
+    fprintf(stderr, "%s\n", message);
+    exit(EXIT_FAILURE);
+  }
+}
+
+/* Usage Helper Function */
 void usageMsg (char *vmExecName)
 {
     printf("Usage: %s <file to run> \n", vmExecName);
@@ -135,40 +323,44 @@ int main (int argc, char *argv[])
         &&L_UNDEFINED, &&L_UNDEFINED, &&L_UNDEFINED, &&L_UNDEFINED, /* 0x25 .. 0x28 */
         &&L_UNDEFINED, /* 0x29 */
         &&L_CLOCK /* 0x2A */
+    #if GC
+      , &&L_UNDEFINED, &&L_UNDEFINED, &&L_UNDEFINED, &&L_UNDEFINED, &&L_UNDEFINED /* 0x2B .. 0x2F */
+      , &&L_CONS  /* 0x30 */
+      , &&L_HEAD  /* 0x31 */
+      , &&L_TAIL  /* 0x32 */
+    #endif // GC
     };
-
-    /* Defines how many bytes contain data for each opcode
-    
-    static const uint8_t op_bytes[] = {
-        0, 2, 2, 1, 1, 0, 4, 2, 1, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0
-    };
-    
-    */
 
     /* Load bytecode */
     errno = 0;
     int8_t *code = (int8_t *)calloc(sizeof(int8_t), (int64_t)CODE_MAX * CODE_MAX);
     if (code == NULL || errno != 0) {
-        TEST();
         fprintf(stderr, "%s", strerror(errno));
         exit(EXIT_FAILURE);
     }
     int32_t len = 0;
     while(!feof(file)) {
         len += fread(code, sizeof(int8_t), CODE_MAX - 1, file);
-        if (len >= CODE_MAX - 1) { TEST(); exit(0); }
+        if (len >= CODE_MAX - 1) {
+            fprintf(stderr, "CODE SIZE EXCEEDED!\n");
+            exit(EXIT_FAILURE);
+        }
     }
     fclose(file);
-    assert(len > 0);
+    assert_msg(len > 0, "Error while loading bytecode from file...");
 
     /* Initialize Stack */
     static int32_t stack[STACK_MAX] = {0};
     int32_t stackTop = 0;
-    
+
+    #if GC
+    /* Create Heap */
+    #define HEAP_SIZE (1 << 10)
+    // Allocate space for heap
+    heap_t * heap = new heap_t(HEAP_SIZE);
+    int32_t next_free = 0;
+    #endif
+
     /* Start from beginning */
     pc = &code[0];
 
@@ -186,15 +378,17 @@ L_HALT:
     #endif
     goto L_CLEANUP;
 }
+
 /* UNCONDITIONAL JUMP */
 L_JMP:
 {
     #if DEBUG
     printf ("JMP %x\n", code[  uf2b(pc + 1) ]);
     #endif
-    pc =  &code[ uf2b(pc + 1) ];
+    pc =  &code[ pc[1] | (pc[2] << 8) ];
     NEXT_INSTR;
 }
+
 /* JUMP IF NOT ZERO */
 L_JNZ:
 {
@@ -202,24 +396,28 @@ L_JNZ:
     printf ("JNZ %x\n", code[ uf2b(pc + 1) ]);
     #endif
     if ( stack[stackTop - 1] != 0 ) {
-        pc = &code[ uf2b(pc + 1) ];
+        pc = &code[ pc[1] ];
     } else { 
         pc += 3;
     }
+    stackTop -= 1;
     NEXT_INSTR;
 }
+
 /* DUPLICATES ELEMENT */
 L_DUP:
+{
     #if DEBUG
     printf ("DUP %d\n", sf1b (pc + 1));
     #endif
-    assert(true);
-    int32_t offset = sf1b (pc + 1);
+    ;
+    int32_t offset = pc[1];
     int32_t loc = (offset >= stackTop) ? 0 : stackTop - offset - 1;
-    int32_t  element = stack[loc];
+    int32_t element = stack[loc];
     STACK_PUSH(stack, &stackTop, element);
     pc += 2;
     NEXT_INSTR;
+}
 
 /* SWAP TOP ELEMENT WITH iTH ELEMENT */
 L_SWAP:
@@ -227,7 +425,7 @@ L_SWAP:
     #if DEBUG
     printf ("SWAP %d\n", sf1b (pc + 1));
     #endif
-    int32_t offset = sf1b (pc + 1);
+    int32_t offset = pc[1];
     int32_t loc = stackTop - offset;
     if (offset > stackTop) { loc = 0; }
     int32_t element = stack[loc];
@@ -255,7 +453,7 @@ L_PUSH4:
     #if DEBUG
     printf ("PUSH4 %d\n", sf4b (pc + 1));
     #endif
-    int32_t element32 = sf4b (pc + 1);
+    int32_t element32 = pc[1] | (pc[2] << 8) | (pc[3] << 16) | (pc[4] << 24);
     STACK_PUSH(stack, &stackTop, element32);
     pc += 5;
     NEXT_INSTR;
@@ -267,8 +465,8 @@ L_PUSH2:
     #if DEBUG
     printf ("PUSH2 %d\n", sf2b(pc + 1));
     #endif
-    int32_t element16 = sf2b(pc + 1);
-    STACK_PUSH(stack, &stackTop, (int32_t)element16);
+    int32_t element16 = pc[1] | (pc[2] << 8);
+    STACK_PUSH(stack, &stackTop, element16);
     pc += 3;
     NEXT_INSTR;
 }
@@ -279,7 +477,7 @@ L_PUSH:
     #if DEBUG
     printf ("PUSH1 %d\n", sf1b (pc + 1));
     #endif
-    int32_t element8 = sf1b (pc + 1);
+    int32_t element8 = pc[1];
     STACK_PUSH(stack, &stackTop, element8);
     pc += 2;
     NEXT_INSTR;
@@ -313,7 +511,7 @@ L_SUB:
 L_MUL:  
 {
     #if DEBUG
-    printf ("MUL %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("MUL %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] *= stack[stackTop - 1];
     stackTop -= 1;
@@ -325,7 +523,7 @@ L_MUL:
 L_DIV:
 {
     #if DEBUG
-    printf ("DIV %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("DIV %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] /= stack[stackTop - 1];
     stackTop -= 1;
@@ -337,7 +535,7 @@ L_DIV:
 L_MOD:  
 {
     #if DEBUG
-    printf ("MOD %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("MOD %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] = stack[stackTop - 2] % stack[stackTop - 1];
     stackTop -= 1;
@@ -349,7 +547,7 @@ L_MOD:
 L_EQ:   
 {
     #if DEBUG
-    printf ("EQ %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("EQ %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] = ( stack[stackTop - 1] == stack[stackTop - 2] );
     stackTop -= 1;
@@ -361,7 +559,7 @@ L_EQ:
 L_NE:   
 {
     #if DEBUG
-    printf ("NE %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("NE %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] = !( stack[stackTop - 1] == stack[stackTop - 2] );
     stackTop -= 1;
@@ -373,7 +571,7 @@ L_NE:
 L_LT:   
 {
     #if DEBUG
-    printf ("LT %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("LT %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] = ( stack[stackTop - 2] > stack[stackTop - 1] );
     stackTop -= 1;
@@ -385,7 +583,7 @@ L_LT:
 L_GT:   
 {
     #if DEBUG
-    printf ("GT %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("GT %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif    
     stack[stackTop - 2] = ( stack[stackTop - 2] < stack[stackTop - 1] );
     stackTop -= 1;
@@ -397,7 +595,7 @@ L_GT:
 L_LE:   
 {
     #if DEBUG
-    printf ("LE %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("LE %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] = ( stack[stackTop - 2] >= stack[stackTop - 1] );
     stackTop -= 1;
@@ -409,7 +607,7 @@ L_LE:
 L_GE:   
 {
     #if DEBUG
-    printf ("GE %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("GE %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     stack[stackTop - 2] = ( stack[stackTop - 2] <= stack[stackTop - 1] );
     stackTop -= 1;
@@ -432,7 +630,7 @@ L_NOT:
 L_AND:  
 {
     #if DEBUG
-    printf ("AND %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("AND %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     if (stack[stackTop - 1] != 0 && stack[stackTop - 2] != 0)
         stack[stackTop - 2] = 1;
@@ -447,7 +645,7 @@ L_AND:
 L_OR:   
 {
     #if DEBUG
-    printf ("OR %d %d\n", stack[stackTop - 1], stack[stackTop - 2]);
+    printf ("OR %d %d\n", stack[stackTop - 2], stack[stackTop - 1]);
     #endif
     pc += 1;
     if (stack[stackTop - 1] == 0 && stack[stackTop - 2] == 0)
@@ -495,7 +693,7 @@ L_UNDEFINED:
     goto L_CLEANUP;
 }
 
-/*  */
+/* CLOCK */
 L_CLOCK:
 {
     #if DEBUG
@@ -507,13 +705,116 @@ L_CLOCK:
     NEXT_INSTR;
 }
 
+#if GC
+/* CONS */
+L_CONS:
+{
+    #if DEBUG
+    printf("CONS\n");
+    #endif
+    ;
+
+    // if not enough memory => run GC
+    if (next_free == -1) {
+        #if DEBUG
+        DBG("L_CONS: Run out of memory...");
+        #endif
+        next_free = heap->collect();
+    }
+    assert_msg(next_free >= 0, "L_CONS: Unable to find some memory!");
+    
+    // make sure its marked as an address before pushing into stack
+    int32_t loc = MAKE_ADDRESS(next_free);
+    
+    // get top 2 elements from stack
+    int32_t b = STACK_POP(stack, &stackTop);
+    int32_t a = STACK_POP(stack, &stackTop);
+
+    // create a cell and put it into heap
+    heap->cells[next_free] = cell_t(a, b);
+    
+    // update next_free index
+    next_free = heap->cells[next_free].get_next();
+
+    // append location of memory index in memory pool
+    // heap->pool.push_back(stackTop);
+
+    // push the location of cell into stack
+    STACK_PUSH(stack, &stackTop, loc);
+
+    // advance to next instruction
+    pc += 1;
+    NEXT_INSTR;
+}
+
+/* HEAD */
+L_HEAD:
+{
+    #if DEBUG
+    printf("HEAD\n");
+    #endif
+    ;
+    // take element from stack
+    int32_t loc = STACK_POP(stack, &stackTop);
+
+    // make sure it is an address before doing anything
+    assert_msg(is_cell(loc), "L_HEAD: Element is not an address.");
+
+    // remove according location from pools
+    // heap->pool.pop_back();
+
+    // push head into stack
+    STACK_PUSH(stack, &stackTop, heap->cells[loc].cell_head());
+
+    // advance to next instruction
+    pc += 1;
+    NEXT_INSTR;
+}
+
+/* TAIL */
+L_TAIL:
+{
+    #if DEBUG
+    printf("TAIL\n");
+    #endif
+    ;
+    // take element from stack
+    int32_t loc = STACK_POP(stack, &stackTop);
+
+    // make sure it is an address before doing anything
+    assert_msg(is_cell(loc), "L_TAIL: Element is not an address.");
+
+    // remove according location from pools
+    // heap->pool.pop_back();
+
+    // push tail into stack
+    STACK_PUSH(stack, &stackTop, heap->cells[loc].cell_tail());
+
+    // advance to next instruction
+    pc += 1;
+    NEXT_INSTR;
+}
+#endif // GC
+
 // -----------------------------------------------------------------
 
 L_CLEANUP:
 {
+    #if DEBUG
     /* VM ENDED INTERPRETING */
     clock_t vm_end = clock();
     printf ("Interpreted in %lf\n", ((double)(vm_end - vm_start) / CLOCKS_PER_SEC));
+    #endif
+
+    #if GC
+    // Deallocate memory used for "heap"
+
+    #if DEBUG
+    DBG("Deallocating memory for heap...");
+    #endif
+
+    delete heap;
+    #endif
 
 	#if DEBUG
     for (int32_t j = stackTop - 1; j >= 0; j--) {
@@ -530,7 +831,7 @@ L_CLEANUP:
 /**
  *  Push Element into STACK
  */
-static inline void STACK_PUSH(int32_t *stack, int32_t *stackTop, int32_t value)
+void STACK_PUSH(int32_t *stack, int32_t *stackTop, int32_t value)
 {
     errno = 0;
     if (*stackTop + 1 == STACK_MAX) {
@@ -545,13 +846,12 @@ static inline void STACK_PUSH(int32_t *stack, int32_t *stackTop, int32_t value)
 /** 
  * Pop the top element from STACK
  */
-static inline int32_t STACK_POP(int32_t *stack, int32_t *stackTop)
+int32_t STACK_POP(int32_t *stack, int32_t *stackTop)
 {
     errno = 0;
-    if (*stackTop == 0) {
+    if (*stackTop <= 0) {
         fprintf(stderr, "STACK EMPTY :(\n");
-        errno = EPERM;
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
     *stackTop -= 1;
     return stack[*stackTop];
@@ -565,9 +865,21 @@ static inline int32_t STACK_PEEK(int32_t *stack, int32_t stackTop)
     errno = 0;
     if (stackTop == 0) {
         fprintf(stderr, "STACK EMPTY :(\n");
-        errno = EPERM;
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
     return stack[stackTop - 1];
 }
-// ----------------------------------------------------------
+
+
+// --------------------------[CELL_T]--------------------------------
+
+#if GC
+
+// check if it a cell
+static inline bool is_cell(int32_t val) {
+    return (val & BIT31);
+}
+
+// --------------------------[HEAP_T]--------------------------------
+
+#endif // GC

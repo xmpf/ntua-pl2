@@ -9,6 +9,9 @@
  *  make lab5:
  *      g++ -Wall -DGC=1 vm.cpp -o vm_gc
  *
+ *  Notes:
+ *      Lab5(GC) is not implemented.
+ *
  *  Resources:
  *  [1] https://youtu.be/DUNkdl0Jhgs  
  *
@@ -36,7 +39,7 @@
 #if DEBUG
 #define DBG(msg) ((fprintf(stderr, "DEBUG(%d): %s\n", __LINE__, (msg))))
 #else
-#define DBG()
+#define DBG(msg)
 #endif
 
 /* MACROS */
@@ -93,35 +96,49 @@ typedef enum {
 #define BIT31 (1 << 31)
 #define BIT30 (1 << 30)
 
-// MAKE_ADDRESS
+// MAKE_ADDRESS => BIT31 = 1, BIT30 = 0
 #define MAKE_ADDRESS(x) (((x) | BIT31) & ~(BIT30))
 
-// CLEAR_FLAGS
+// CLEAR_FLAGS => BIT31 = BIT30 = 0
 #define CLEAR_FLAGS(x) ((x) & (BIT30 - 1))
 
-// IS_MARKED
-#define IS_MARKED(x) ((x) & BIT30)
+// IS_MARKED => CHECK IF BIT30 == 1
+#define IS_VISITED(x) ((x) & BIT30)
 
 // GET OBJ_TYPE BY LOOKING THE MSB
 #define OBJ_TYPE(x) ((x) & BIT31)
 
-// SET MSB TO 1
+// SET MSB => BIT31 = 1
 #define SET_MSB(x)  ((x) | BIT31)
 
 // Cell structure
 typedef struct cell_t {
-    int32_t next;
-    int32_t head;
-    int32_t tail;
+    bool is_atom;
+    bool is_marked;
+
+    cell_t * next;
+
+    union box_t {
+        // ATOM
+        int32_t data;
+
+        // CELL
+        struct {
+            cell_t * head;
+            cell_t * tail;
+        };
+    } box;
 
     // Constructors
-    cell_t(int32_t a, int32_t b) {
+    cell_t() {
         #if DEBUG
         DBG("cell_t: Constructor called...");
         #endif
-        this->next = -1;
-        this->head = a;
-        this->tail = b;
+        this->is_atom = false;
+        this->is_marked = false;
+        this->next = NULL;
+        this->box.head = NULL;
+        this->box.tail = NULL;
     }
 
     // Destructor
@@ -130,55 +147,17 @@ typedef struct cell_t {
         DBG("~cell_t: Destructor called...");
         #endif
     }
-
-    // Getters
-    int32_t cell_head() { // get first element
-        return this->head;
-    }
-    int32_t cell_tail() { // get second element
-        return this->tail;
-    }
-    int32_t get_next() { // get next
-        return this->next;
-    }
-    // Setters
-    void set_head(int32_t v) { // set first element
-        this->head = v;
-    }
-    void set_tail(int32_t v) { // set second element
-        this->tail = v;
-    }
-    void set_next(int32_t v) { // set next
-        this->next = v;
-    }
-    void mark_head() { // mark head
-        this->head |= BIT31;
-    }
-    void mark_tail() { // mark tail
-        this->tail |= BIT31;
-    }
-    void unmark_head() { // unamrk head
-        this->head &= ~(BIT31);
-    }
-    void unmark_tail() { // unmark tail
-        this->tail &= ~(BIT31);
-    }
-    void unmark_and_uncheck() {
-        this->head &= ~(BIT30);
-        this->tail &= ~(BIT30);
-    }
 } cell_t;
 
 // Heap structure
 typedef struct heap_t {
     size_t   size;              /* maybe support to dynamically resize heap */
     cell_t * cells;             /* memory space for cells */
-    // std::vector<int32_t> pool;  /* pool of indexes of memory locations on stack */
 
     // Constructor
     heap_t() {
         this->size = 0;
-        cells = NULL;
+        this->cells = NULL;
     }
 
     heap_t(size_t size) {
@@ -189,17 +168,11 @@ typedef struct heap_t {
         this->size = size;
         errno = 0;
         this->cells = (cell_t *)malloc(size * sizeof(cell_t));
-        if (cells == NULL || errno != 0) {
+        if (this->cells == NULL || errno != 0) {
             fprintf(stderr, "heap_t: Unable to allocate memory!\n \
                              %s\n", strerror(errno));
             exit(EXIT_FAILURE);
         }
-        // Initially, every cell in the heap, points to its next one.
-        for(size_t i = 0; i < size - 1; i++) {
-            this->cells[i].next = i + 1;
-        }
-        // last cell in the heap
-        this->cells[size - 1].next = -1;
     }
 
     // Destructor
@@ -212,14 +185,11 @@ typedef struct heap_t {
         this->cells = NULL;
     }
 
-    // Getters
-    size_t get_size() { return this->size; }
-
-    // Setters
-
     // DFS
-    void DFS(int32_t ix) {
-        // TODO
+    void DFS(int32_t x) {
+        // Implementation of pseudocode
+        // from slides (page 17)
+        
     }
 
     // Garbage Collection
@@ -228,15 +198,12 @@ typedef struct heap_t {
         DBG("heap_t::collect");
         #endif
 
-        // TODO
-
         return 0;
     }
 
 } heap_t;
 
 /* Functions Prototypes */
-static inline bool is_cell(int32_t);
 
 #endif // GC
 
@@ -358,7 +325,6 @@ int main (int argc, char *argv[])
     #define HEAP_SIZE (1 << 10)
     // Allocate space for heap
     heap_t * heap = new heap_t(HEAP_SIZE);
-    int32_t next_free = 0;
     #endif
 
     /* Start from beginning */
@@ -714,33 +680,7 @@ L_CONS:
     #endif
     ;
 
-    // if not enough memory => run GC
-    if (next_free == -1) {
-        #if DEBUG
-        DBG("L_CONS: Run out of memory...");
-        #endif
-        next_free = heap->collect();
-    }
-    assert_msg(next_free >= 0, "L_CONS: Unable to find some memory!");
-    
-    // make sure its marked as an address before pushing into stack
-    int32_t loc = MAKE_ADDRESS(next_free);
-    
-    // get top 2 elements from stack
-    int32_t b = STACK_POP(stack, &stackTop);
-    int32_t a = STACK_POP(stack, &stackTop);
-
-    // create a cell and put it into heap
-    heap->cells[next_free] = cell_t(a, b);
-    
-    // update next_free index
-    next_free = heap->cells[next_free].get_next();
-
-    // append location of memory index in memory pool
-    // heap->pool.push_back(stackTop);
-
-    // push the location of cell into stack
-    STACK_PUSH(stack, &stackTop, loc);
+    // TODO
 
     // advance to next instruction
     pc += 1;
@@ -756,15 +696,12 @@ L_HEAD:
     ;
     // take element from stack
     int32_t loc = STACK_POP(stack, &stackTop);
-
+    bool is_addr = OBJ_TYPE(loc);
     // make sure it is an address before doing anything
-    assert_msg(is_cell(loc), "L_HEAD: Element is not an address.");
-
-    // remove according location from pools
-    // heap->pool.pop_back();
+    assert_msg(is_addr, "L_HEAD: Element is not an address.");
 
     // push head into stack
-    STACK_PUSH(stack, &stackTop, heap->cells[loc].cell_head());
+    // TODO
 
     // advance to next instruction
     pc += 1;
@@ -780,15 +717,12 @@ L_TAIL:
     ;
     // take element from stack
     int32_t loc = STACK_POP(stack, &stackTop);
-
+    bool is_addr = OBJ_TYPE(loc) != 0;
     // make sure it is an address before doing anything
-    assert_msg(is_cell(loc), "L_TAIL: Element is not an address.");
-
-    // remove according location from pools
-    // heap->pool.pop_back();
+    assert_msg(is_addr, "L_TAIL: Element is not an address.");
 
     // push tail into stack
-    STACK_PUSH(stack, &stackTop, heap->cells[loc].cell_tail());
+    // TODO
 
     // advance to next instruction
     pc += 1;
@@ -874,11 +808,6 @@ static inline int32_t STACK_PEEK(int32_t *stack, int32_t stackTop)
 // --------------------------[CELL_T]--------------------------------
 
 #if GC
-
-// check if it a cell
-static inline bool is_cell(int32_t val) {
-    return (val & BIT31);
-}
 
 // --------------------------[HEAP_T]--------------------------------
 

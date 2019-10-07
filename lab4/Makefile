@@ -1,5 +1,8 @@
-CC=gcc
-CFLAGS=-g -Wall -Wextra
+CXX=g++
+CXXFLAGS=-Wall -O2
 
-vm : vm.c
-	$(CC) $(CFLAGS) vm.c -o vm
+vm : vm.cpp
+	$(CXX) $(CXXFLAGS) $< -o $@
+
+vm_gc : vm.cpp
+	$(CXX) $(CXXFLAGS) -DGC=1 $< -o $@

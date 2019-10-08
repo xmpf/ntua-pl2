@@ -1,4 +1,5 @@
-CC=gcc
-CFLAGS=-Wall -O2
+CXX=g++
+CXXFLAGS=-Wall -O2
 
-$(CC) $(CFLAGS) $< -o $@
+vm-gc: vm_gc.cpp
+	$(CXX) $(CXXFLAGS) -DDEBUG=0 $< -o $@
